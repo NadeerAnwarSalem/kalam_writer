@@ -13,7 +13,7 @@ supabase_admin: Client = create_client(url, service_key)
 
 image_bytes = None  # Initialize image_bytes to None
 img_path = Path(__file__).parent / "bg_img.jpg"
-placeholder_img = Image.open(img_path)
+placeholder_img = image_to_base64(img_path) if img_path.exists() else None
 
 def update_article_status(article_id: str, new_status: bool):
     """Update a specific article's status in Supabase."""
