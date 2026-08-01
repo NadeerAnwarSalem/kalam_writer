@@ -1,11 +1,9 @@
 import os
 import pandas as pd
-from dotenv import load_dotenv
 
 from utils import *
 from supabase import create_client, Client
 
-load_dotenv()  
 url: str = st.secrets.get("SUPABASE_URL")
 key: str = st.secrets.get("SUPABASE_KEY")
 service_key: str = st.secrets.get("SUPABASE_SERVICE_KEY")
@@ -180,8 +178,14 @@ if not article_id:
                                 st.error("Please fill in all required fields (Title, Summary, Content).")
                             elif len(article_content) > 10000:
                                 st.error("Article content exceeds the maximum length of 10,000 characters.")
-                            elif article_image:
-                                status,image_url = upload_file_to_r2(article_image, f"{article_title.lower().replace(' ', '-')}.jpg", f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}")
+                            elif not article_image:
+                                st.error("Please upload an article image.")
+                            else:
+                                status, image_url = upload_file_to_r2(
+                                    article_image,
+                                    f"{article_title.lower().replace(' ', '-')}.jpg",
+                                    f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
+                                )
                                 response = supabase.table("articles").insert(
                                     {
                                         "slug": article_title.lower().replace(" ", "-"),
@@ -193,13 +197,14 @@ if not article_id:
                                         "reading_time_minutes": calculate_reading_time(article_content),
                                         "author_id": st.session_state["user_id"],
                                         "language": article_language,
-                                        "article_author": article_author
-                                }
-                            ).execute()
-                            if response:
-                                st.success(f"Article '{article_title}' created successfully!")
-                            else:
-                                st.error(f"Failed to create article!")
+                                        "article_author": article_author,
+                                    }
+                                ).execute()
+
+                                if response.data:
+                                    st.success(f"Article '{article_title}' created successfully!")
+                                else:
+                                    st.error("Failed to create article!")
                 with right:
                     
                     if image_bytes:
