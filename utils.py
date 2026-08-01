@@ -7,12 +7,13 @@ import PyPDF2
 from docx import Document
 import boto3
 import os
+import streamlit as st
 
-R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
-R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
-R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
-R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-R2_PUBLIC_BASE_URL = os.getenv("R2_PUBLIC_BASE_URL")
+R2_BUCKET_NAME = st.secrets.get("R2_BUCKET_NAME")
+R2_ACCOUNT_ID = st.secrets.get("R2_ACCOUNT_ID")
+R2_ACCESS_KEY_ID = st.secrets.get("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = st.secrets.get("R2_SECRET_ACCESS_KEY")
+R2_PUBLIC_BASE_URL = st.secrets.get("R2_PUBLIC_BASE_URL")
 r2_client = boto3.client(
     service_name='s3',
     endpoint_url=f'https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com',
