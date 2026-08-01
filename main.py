@@ -12,7 +12,8 @@ supabase: Client = create_client(url, key)
 supabase_admin: Client = create_client(url, service_key)
 
 image_bytes = None  # Initialize image_bytes to None
-placeholder_img = Image.open("bg_img.jpg")  
+img_path = Path(__file__).parent / "bg_img.jpg"
+placeholder_img = Image.open(img_path)
 
 def update_article_status(article_id: str, new_status: bool):
     """Update a specific article's status in Supabase."""
