@@ -1,13 +1,15 @@
 import streamlit as st
 import os
 import pandas as pd
+from dotenv import load_dotenv
 
 from utils import *
 from supabase import create_client, Client
 
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
-service_key: str = os.environ.get("SUPABASE_SERVICE_KEY")
+load_dotenv()  
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+service_key: str = os.getenv("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(url, key)
 supabase_admin: Client = create_client(url, service_key)
 
