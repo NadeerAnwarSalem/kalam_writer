@@ -219,7 +219,7 @@ if not article_id:
                         article_image = st.file_uploader("Article Image", type=["jpg", "jpeg", "png"])
                         article_author = st.text_input("Article Author", value=st.session_state.get("username", "Unknown Author"))
                         author_unknown = st.checkbox("Author Unknown", value=False)
-                        if author_unknown:
+                        if author_unknown or article_author.strip() == "":
                             article_author = "Unknown Author"
                         article_read_time = calculate_reading_time(article_content)
 
