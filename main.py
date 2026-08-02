@@ -13,7 +13,6 @@ supabase_admin: Client = create_client(url, service_key)
 
 image_bytes = None  # Initialize image_bytes to None
 img_path = Path(__file__).parent / "bg_img.jpg"
-placeholder_img = base64.b64encode(Image.open(img_path).tobytes()).decode()
 
 def update_article_status(article_id: str, new_status: bool):
     """Update a specific article's status in Supabase."""
@@ -217,7 +216,7 @@ if not article_id:
                     background = f"data:image/png;base64,{image}"
                 else:
                     # Placeholder image
-                    background = placeholder_img
+                    background = "https://placehold.co/1080x1920"
 
                 html = f"""
                 <style>
