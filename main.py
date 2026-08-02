@@ -183,7 +183,7 @@ if not article_id:
                         elif len(article_content) > 10000:
                             st.error("Article content exceeds the maximum length of 10,000 characters.")
                         elif not article_image:
-                            article_image = placeholder_img
+                            article_image = "https://placehold.co/1080x1920"
                         else:
                             status, image_url = upload_file_to_r2(
                                 article_image,
