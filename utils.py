@@ -22,6 +22,12 @@ r2_client = boto3.client(
     region_name='auto' 
 )
 
+@st.dialog("Article Dialog")
+def article_dialog(article_data: dict):
+    st.title(f"{article_data['title']}")
+    st.subheader(f"{article_data['summary']}")
+    st.write(f"{article_data['content']}")
+
 def upload_file_to_r2(uploaded_file, file_name, directory):
     full_path = f"{directory.strip('/')}/{file_name}"
     try:
@@ -30,8 +36,13 @@ def upload_file_to_r2(uploaded_file, file_name, directory):
     except Exception as e:
         return 500, "Error uploading file to R2: " + str(e)
 
-
-
+def delete_file_from_r2(file_name, directory):
+    full_path = f"{directory.strip('/')}/{file_name}"
+    try:
+        r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=full_path)
+        return 200, "File deleted successfully."
+    except Exception as e:
+        return 500, "Error deleting file from R2: " + str(e)
 
 def extract_text_from_pdf(uploaded_file) -> str:
     """Extract text from PDF file."""
