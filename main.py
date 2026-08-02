@@ -20,7 +20,7 @@ def update_article_status(article_id: str, new_status: bool):
         "id", article_id
     ).execute()
 
-@st.dialog("Edit Article Dialog")
+@st.dialog("Edit Article Dialog", dismissible=False)
 def edit_article_dialog(article_data: dict):
     st.title(f"Edit Article: {article_data['title']}")
     new_title = st.text_input("Title", value=article_data['title'], disabled=True)
@@ -53,7 +53,8 @@ def edit_article_dialog(article_data: dict):
         }
         supabase.table("articles").update(updated_data).eq("id", article_data['id']).execute()
         st.success("Article updated successfully!")
-
+        st.rerun()
+          
 article_id = st.query_params.get("article_id")
 
 if not article_id:
@@ -170,10 +171,10 @@ if not article_id:
                             st.toast("Article statuses updated successfully!")
 
         #user dashboard code here
-        create_article_tab, manage_articles_tab = st.tabs(["Create Article", "Manage Articles"])
+        manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])
         with manage_articles_tab:
             st.write("Manage Articles")
-            articles_data = supabase.table("articles").select("*").execute().data
+            articles_data = supabase.table("articles").select("*").eq("author_id", st.session_state.get("user_id")).execute().data
             articles = [(article["id"], article["article_author"], article["title"], article["status"], "View", "Actions") for article in articles_data]
             df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Read Article", "Actions"])  
             df_articles["Options"] = df_articles["ID"].apply(
@@ -383,13 +384,13 @@ if not article_id:
                         st.write("Start writing to see a preview of your article content here.")
 
 
-            if st.button("Logout"):
-                supabase.auth.sign_out()
-                st.session_state["logged_in"] = False
-                st.session_state["user_email"] = None
-                st.session_state["user_id"] = None
-                st.session_state["username"] = None
-                st.rerun()
+        if st.button("Logout"):
+            supabase.auth.sign_out()
+            st.session_state["logged_in"] = False
+            st.session_state["user_email"] = None
+            st.session_state["user_id"] = None
+            st.session_state["username"] = None
+            st.rerun()
 else:
     def fetch_article_content(article_id: str):
         """Fetch full article content from Supabase using ID."""
