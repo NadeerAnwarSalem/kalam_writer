@@ -116,18 +116,8 @@
 
 # ---------------------------------------
 import os
-
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-
-import arabic_reshaper
-from bidi.algorithm import get_display
-
-from supabase import create_client, Client
 from bs4 import BeautifulSoup
+from supabase import create_client, Client
 
 
 # -----------------------------
@@ -149,25 +139,6 @@ data = (
 
 
 # -----------------------------
-# Arabic font
-# -----------------------------
-
-FONT_PATH = r"C:\Users\nadee\Downloads\NotoNaskhArabic-Regular.ttf"
-
-pdfmetrics.registerFont(
-    TTFont("Arabic", FONT_PATH)
-)
-
-style = ParagraphStyle(
-    "Arabic",
-    fontName="Arabic",
-    fontSize=14,
-    leading=22,
-    alignment=2,   # right align
-)
-
-
-# -----------------------------
 # Helpers
 # -----------------------------
 
@@ -181,77 +152,49 @@ def clean_text(text):
         "html.parser"
     ).get_text("\n", strip=True)
 
-    # Arabic shaping
-    text = arabic_reshaper.reshape(text)
-    text = get_display(text)
-
-    return text.replace("\n", "<br/>")
+    return text.strip()
 
 
-def create_pdf(path, arabic_text, full_text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+def save_txt(path, text):
+    os.makedirs(
+        os.path.dirname(path),
+        exist_ok=True
+    )
 
-    doc = SimpleDocTemplate(
+    with open(
         path,
-        pagesize=A4,
-        rightMargin=50,
-        leftMargin=50,
-        topMargin=50,
-        bottomMargin=50,
-    )
-
-    story = []
-
-    story.append(
-        Paragraph(
-            arabic_text,
-            style
-        )
-    )
-
-    story.append(Spacer(1, 20))
-
-    story.append(
-        Paragraph(
-            full_text,
-            style
-        )
-    )
-
-    doc.build(story)
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write(text)
 
 
 # -----------------------------
-# Generate PDFs
+# Generate TXT files
 # -----------------------------
 
-BASE_FOLDER = r"C:\Users\nadee\OneDrive\Desktop\Descriptions"
+BASE_FOLDER = r"C:\Users\nadee\Desktop\Descriptions"
 
 for ayah in data:
+
     surah = ayah["surah"]
     ayah_number = ayah["ayah_number"]
-    arabic_text = ayah["arabic_text"]
-    description = ayah["full_description"]
 
-    folder = os.path.join(
+    arabic_text = clean_text(ayah["arabic_text"])
+    full_description = clean_text(ayah["full_description"])
+
+    file_path = os.path.join(
         BASE_FOLDER,
-        str(surah)
+        str(surah),
+        f"{ayah_number}.txt"
     )
 
-    pdf_path = os.path.join(
-        folder,
-        f"{ayah_number}.pdf"
+    save_txt(
+        file_path,
+        f"{arabic_text}\n\n{full_description}"
     )
 
-    
-
-    create_pdf(
-        pdf_path,
-        clean_text(arabic_text),
-        clean_text(description)
-    )
-
-    print(f"Created: {pdf_path}")
+    print(f"Created {file_path}")
 
 
-print("All PDFs generated successfully!")
+print("Done!")
