@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 
+from datetime import datetime, timezone
 from PIL import Image
 from utils import *
 from supabase import create_client, Client
@@ -273,6 +274,7 @@ if not article_id:
                                         "author_id": st.session_state["user_id"],
                                         "language": article_language,
                                         "article_author": article_author,
+                                        "published_at": datetime.now(timezone.utc).isoformat()  
                                     }
                                 ).execute()
 
