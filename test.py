@@ -87,29 +87,171 @@
 
 # ---------------------------------------------------------------
 
+# import os
+# from datetime import datetime, timezone
+# from supabase import create_client, Client
+
+# url: str = os.environ.get("SUPABASE_URL")
+# key: str = os.environ.get("SUPABASE_KEY")
+# service_key: str = os.environ.get("SUPABASE_SERVICE_KEY")
+
+# # Tip: Use service_key for batch updates to bypass Row Level Security (RLS) if needed
+# supabase: Client = create_client(url, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4amZxd3RueHh2ZGNnemZyd29vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTQxODA1MiwiZXhwIjoyMTAwOTk0MDUyfQ.ZU0b8El9DfiXNQrxrmf49lggH-YJltEkIGhjPojwkMY")
+
+# # 1. Fetch the primary key ('id') and the published_at field
+# response = supabase.table("articles").select("*").execute()
+
+# # 2. Fill published_at with current time for rows where it is missing
+# current_time = datetime.now(timezone.utc).isoformat()
+# updated_data = [
+#     {**item, 'published_at': current_time}
+#     for item in (response.data or [])
+#     if item.get('published_at') is None
+# ]
+
+# # 3. Upsert using the primary key to perform an in-place update
+# if updated_data:
+#     supabase.table("articles").upsert(updated_data).execute()
+#     print(f"Successfully updated {len(updated_data)} rows!")
+
+# ---------------------------------------
 import os
-from datetime import datetime, timezone
+
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+import arabic_reshaper
+from bidi.algorithm import get_display
+
 from supabase import create_client, Client
+from bs4 import BeautifulSoup
 
-url: str = os.environ.get("SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_KEY")
-service_key: str = os.environ.get("SUPABASE_SERVICE_KEY")
 
-# Tip: Use service_key for batch updates to bypass Row Level Security (RLS) if needed
-supabase: Client = create_client(url, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp4amZxd3RueHh2ZGNnemZyd29vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTQxODA1MiwiZXhwIjoyMTAwOTk0MDUyfQ.ZU0b8El9DfiXNQrxrmf49lggH-YJltEkIGhjPojwkMY")
+# -----------------------------
+# Supabase
+# -----------------------------
 
-# 1. Fetch the primary key ('id') and the published_at field
-response = supabase.table("articles").select("*").execute()
+url = os.environ["SUPABASE_URL"]
+key = os.environ["SUPABASE_KEY"]
 
-# 2. Fill published_at with current time for rows where it is missing
-current_time = datetime.now(timezone.utc).isoformat()
-updated_data = [
-    {**item, 'published_at': current_time}
-    for item in (response.data or [])
-    if item.get('published_at') is None
-]
+supabase: Client = create_client(url, key)
 
-# 3. Upsert using the primary key to perform an in-place update
-if updated_data:
-    supabase.table("articles").upsert(updated_data).execute()
-    print(f"Successfully updated {len(updated_data)} rows!")
+data = (
+    supabase
+    .table("ayat")
+    .select("surah, ayah_number, arabic_text, full_description")
+    .execute()
+    .data
+)
+
+
+# -----------------------------
+# Arabic font
+# -----------------------------
+
+FONT_PATH = r"C:\Users\nadee\Downloads\NotoNaskhArabic-Regular.ttf"
+
+pdfmetrics.registerFont(
+    TTFont("Arabic", FONT_PATH)
+)
+
+style = ParagraphStyle(
+    "Arabic",
+    fontName="Arabic",
+    fontSize=14,
+    leading=22,
+    alignment=2,   # right align
+)
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+
+def clean_text(text):
+    if not text:
+        return ""
+
+    # Remove HTML
+    text = BeautifulSoup(
+        str(text),
+        "html.parser"
+    ).get_text("\n", strip=True)
+
+    # Arabic shaping
+    text = arabic_reshaper.reshape(text)
+    text = get_display(text)
+
+    return text.replace("\n", "<br/>")
+
+
+def create_pdf(path, arabic_text, full_text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    doc = SimpleDocTemplate(
+        path,
+        pagesize=A4,
+        rightMargin=50,
+        leftMargin=50,
+        topMargin=50,
+        bottomMargin=50,
+    )
+
+    story = []
+
+    story.append(
+        Paragraph(
+            arabic_text,
+            style
+        )
+    )
+
+    story.append(Spacer(1, 20))
+
+    story.append(
+        Paragraph(
+            full_text,
+            style
+        )
+    )
+
+    doc.build(story)
+
+
+# -----------------------------
+# Generate PDFs
+# -----------------------------
+
+BASE_FOLDER = r"C:\Users\nadee\OneDrive\Desktop\Descriptions"
+
+for ayah in data:
+    surah = ayah["surah"]
+    ayah_number = ayah["ayah_number"]
+    arabic_text = ayah["arabic_text"]
+    description = ayah["full_description"]
+
+    folder = os.path.join(
+        BASE_FOLDER,
+        str(surah)
+    )
+
+    pdf_path = os.path.join(
+        folder,
+        f"{ayah_number}.pdf"
+    )
+
+    
+
+    create_pdf(
+        pdf_path,
+        clean_text(arabic_text),
+        clean_text(description)
+    )
+
+    print(f"Created: {pdf_path}")
+
+
+print("All PDFs generated successfully!")
