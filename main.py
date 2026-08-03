@@ -413,7 +413,6 @@ else:
     if article_id:
         # 2. Fetch full article data from Supabase
         article = fetch_article_content(article_id)
-
         if article:
             title = article.get("title", "Untitled Article")
             content = article.get("content", "No content available.")
