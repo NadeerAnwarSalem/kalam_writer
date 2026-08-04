@@ -6,6 +6,7 @@ from PIL import Image
 from utils import *
 from supabase import create_client, Client
 from tag_options import TAG_OPTIONS
+from streamlit_cookies_manager import EncryptedCookieManager
 
 url: str = st.secrets.get("SUPABASE_URL")
 key: str = st.secrets.get("SUPABASE_KEY")
@@ -16,13 +17,37 @@ supabase_admin: Client = create_client(url, service_key)
 image_bytes = None  # Initialize image_bytes to None
 img_path = Path(__file__).parent / "bg_img.jpg"
 
+cookies = EncryptedCookieManager(
+    prefix="myapp/",
+    password=st.secrets["COOKIES_PASSWORD"],  # any long random string in secrets.toml
+)
+if not cookies.ready():
+    st.stop()  # wait for cookies to load before rendering anything else
+
+if not st.session_state.get("logged_in") and cookies.get("refresh_token"):
+    try:
+        auth_response = supabase.auth.refresh_session(cookies.get("refresh_token"))
+        if auth_response.user:
+            st.session_state["logged_in"] = True
+            st.session_state["user_email"] = auth_response.user.email
+            st.session_state["user_id"] = auth_response.user.id
+            st.session_state["username"] = auth_response.user.user_metadata.get("username", "")
+            st.session_state["user_role"] = auth_response.user.app_metadata.get("role", "user")
+            # refresh token may rotate — save the new one
+            cookies["refresh_token"] = auth_response.session.refresh_token
+            cookies.save()
+    except Exception:
+        # refresh token invalid/expired — treat as logged out
+        cookies["refresh_token"] = ""
+        cookies.save()
+
 def update_article_status(article_id: str, new_status: bool):
     """Update a specific article's status in Supabase."""
     supabase.table("articles").update({"status": new_status}).eq(
         "id", article_id
     ).execute()
 
-@st.dialog("Edit Article Dialog", dismissible=False)
+@st.dialog("Edit Article Dialog", dismissible=True)
 def edit_article_dialog(article_data: dict):
     st.title(f"Edit Article: {article_data['title']}")
     new_title = st.text_input("Title", value=article_data['title'], disabled=True)
@@ -85,6 +110,9 @@ if not article_id:
                     st.session_state["user_id"] = response.user.id
                     st.session_state["username"] = response.user.user_metadata.get("username", "")
                     st.session_state["user_role"] = response.user.app_metadata.get("role", "user")
+                    # persist across refreshes
+                    cookies["refresh_token"] = response.session.refresh_token
+                    cookies.save()
                     st.rerun()
                 else:
                     st.error(f"Login failed!")
@@ -401,6 +429,8 @@ if not article_id:
             st.session_state["user_email"] = None
             st.session_state["user_id"] = None
             st.session_state["username"] = None
+            cookies["refresh_token"] = ""
+            cookies.save()
             st.rerun()
 else:
     def fetch_article_content(article_id: str):
