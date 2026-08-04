@@ -54,6 +54,7 @@ def edit_article_dialog(article_data: dict):
             "summary": new_summary,
             "content": new_content,
             "article_author": new_author,
+            "tags": new_article_tags
         }
         supabase.table("articles").update(updated_data).eq("id", article_data['id']).execute()
         st.success("Article updated successfully!")
