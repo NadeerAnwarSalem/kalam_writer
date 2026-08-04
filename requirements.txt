@@ -7,3 +7,4 @@ python-docx
 python-dotenv
 Pillow
 datetime
+streamlit-cookies-manager
