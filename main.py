@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from PIL import Image
 from utils import *
 from supabase import create_client, Client
+from tag_options import TAG_OPTIONS
 
 url: str = st.secrets.get("SUPABASE_URL")
 key: str = st.secrets.get("SUPABASE_KEY")
@@ -41,6 +42,8 @@ def edit_article_dialog(article_data: dict):
         uploaded_txt = st.file_uploader("Upload Text File", type=["txt"])
         if uploaded_txt:
             new_content = extract_text(uploaded_txt, "txt")
+
+    new_article_tags = st.multiselect("Hashtags", options=TAG_OPTIONS, max_selections=5, default=article_data["tags"])
     new_author = st.text_input("Author", value=article_data['article_author'], disabled=True)
     # new_image = st.file_uploader("Upload New Image", type=["png", "jpg", "jpeg"])
 
@@ -217,6 +220,8 @@ if not article_id:
                             uploaded_txt = st.file_uploader("Upload Text File", type=["txt"])
                             if uploaded_txt:
                                 article_content = extract_text(uploaded_txt, "txt")
+
+                        article_hashtags = st.multiselect("Article Tags", options=TAG_OPTIONS, max_selections=5)
                         article_image = st.file_uploader("Article Image", type=["jpg", "jpeg", "png"])
                         article_author = st.text_input("Article Author", value=st.session_state.get("username", "Unknown Author"))
                         author_unknown = st.checkbox("Author Unknown", value=False)
