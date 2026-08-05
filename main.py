@@ -306,42 +306,24 @@ if not article_id:
                                     f"{article_title.lower().replace(' ', '-')}.jpg",
                                     f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
                                 )
-                                if article_language == "Arabic":
-                                    response = supabase.table("articles").insert(
-                                        {
-                                            "slug": article_title.lower().replace(" ", "-"),
-                                            "arabic_title": article_title,
-                                            "arabic_summary": article_summary,
-                                            "arabic_content": article_content,
-                                            "status": "pending",
-                                            "featured_image_url": image_url if status == 200 else None,
-                                            "reading_time_minutes": calculate_reading_time(article_content),
-                                            "author_id": st.session_state["user_id"],
-                                            "language": article_language,
-                                            "article_author": article_author,
-                                            "published_at": datetime.now(timezone.utc).isoformat(), 
-                                            "tags": article_hashtags
-                                            #audio later
-                                        }
-                                    ).execute()
-                                else:
-                                    response = supabase.table("articles").insert(
-                                            {
-                                                "slug": article_title.lower().replace(" ", "-"),
-                                                "english_title": article_title,
-                                                "english_summary": article_summary,
-                                                "english_content": article_content,
-                                                "status": "pending",
-                                                "featured_image_url": image_url if status == 200 else None,
-                                                "reading_time_minutes": calculate_reading_time(article_content),
-                                                "author_id": st.session_state["user_id"],
-                                                "language": article_language,
-                                                "article_author": article_author,
-                                                "published_at": datetime.now(timezone.utc).isoformat(), 
-                                                "tags": article_hashtags
-                                                #audio later
-                                            }
-                                        ).execute()
+
+                                insert_data = {
+                                    "slug": article_title.lower().replace(" ", "-"),
+                                    f"{article_language.lower()}_title": article_title,
+                                    f"{article_language.lower()}_summary": article_summary,
+                                    f"{article_language.lower()}_content": article_content,
+                                    "status": "pending",
+                                    "featured_image_url": image_url if status == 200 else None,
+                                    "reading_time_minutes": calculate_reading_time(article_content),
+                                    "author_id": st.session_state["user_id"],
+                                    "language": article_language,
+                                    "article_author": article_author,
+                                    "published_at": datetime.now(timezone.utc).isoformat(),
+                                    "tags": article_hashtags
+                                    #audio later
+                                }
+
+                                response = supabase.table("articles").insert(insert_data).execute()
 
                                 if response.data:
                                     st.success(f"Article '{article_title}' created successfully!")
