@@ -284,39 +284,40 @@ if not article_id:
                             article_dialog(article_data)
 
                         if create_article_submitted:
-                            if not article_title or not article_summary or not article_content:
-                                st.error("Please fill in all required fields (Title, Summary, Content).")
-                            elif len(article_content) > 10000:
-                                st.error("Article content exceeds the maximum length of 10,000 characters.")
-                            elif not article_image:
-                                st.error("Please upload an article image.")
-                            else:
-                                status, image_url = upload_file_to_r2(
-                                    article_image,
-                                    f"{article_title.lower().replace(' ', '-')}.jpg",
-                                    f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
-                                )
-                                response = supabase.table("articles").insert(
-                                    {
-                                        "slug": article_title.lower().replace(" ", "-"),
-                                        "title": article_title,
-                                        "summary": article_summary,
-                                        "content": article_content,
-                                        "status": "pending",
-                                        "featured_image_url": image_url if status == 200 else None,
-                                        "reading_time_minutes": calculate_reading_time(article_content),
-                                        "author_id": st.session_state["user_id"],
-                                        "language": article_language,
-                                        "article_author": article_author,
-                                        "published_at": datetime.now(timezone.utc).isoformat(), 
-                                        "tags": article_hashtags
-                                    }
-                                ).execute()
+                            st.info("PLEASE TRY AGAIN LATER! DATABASE UNDER REPLANNING!")
+                            # if not article_title or not article_summary or not article_content:
+                            #     st.error("Please fill in all required fields (Title, Summary, Content).")
+                            # elif len(article_content) > 10000:
+                            #     st.error("Article content exceeds the maximum length of 10,000 characters.")
+                            # elif not article_image:
+                            #     st.error("Please upload an article image.")
+                            # else:
+                            #     status, image_url = upload_file_to_r2(
+                            #         article_image,
+                            #         f"{article_title.lower().replace(' ', '-')}.jpg",
+                            #         f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
+                            #     )
+                            #     response = supabase.table("articles").insert(
+                            #         {
+                            #             "slug": article_title.lower().replace(" ", "-"),
+                            #             "title": article_title,
+                            #             "summary": article_summary,
+                            #             "content": article_content,
+                            #             "status": "pending",
+                            #             "featured_image_url": image_url if status == 200 else None,
+                            #             "reading_time_minutes": calculate_reading_time(article_content),
+                            #             "author_id": st.session_state["user_id"],
+                            #             "language": article_language,
+                            #             "article_author": article_author,
+                            #             "published_at": datetime.now(timezone.utc).isoformat(), 
+                            #             "tags": article_hashtags
+                            #         }
+                            #     ).execute()
 
-                                if response.data:
-                                    st.success(f"Article '{article_title}' created successfully!")
-                                else:
-                                    st.error("Failed to create article!")
+                            #     if response.data:
+                            #         st.success(f"Article '{article_title}' created successfully!")
+                            #     else:
+                            #         st.error("Failed to create article!")
                 with right:
                     
                     if image_bytes:
