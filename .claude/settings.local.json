@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(where python *)",
+      "Bash(where streamlit *)",
+      "Bash(curl -s -D - -o /dev/null -H \"Accept-Encoding: gzip\" http://localhost:8532/)",
+      "Bash(\"/tmp/repro_venv/Scripts/python.exe\" -m pip install -q streamlit==1.54.0 \"starlette==1.4.0\")",
+      "Bash(pkill -f streamlit)",
+      "Bash(pkill -f \"repro_venv\")"
+    ]
+  }
+}

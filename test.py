@@ -115,86 +115,99 @@
 #     print(f"Successfully updated {len(updated_data)} rows!")
 
 # ---------------------------------------
+# import os
+# from bs4 import BeautifulSoup
+# from supabase import create_client, Client
+
+
+# # -----------------------------
+# # Supabase
+# # -----------------------------
+
+# url = os.environ["SUPABASE_URL"]
+# key = os.environ["SUPABASE_KEY"]
+
+# supabase: Client = create_client(url, key)
+
+# data = (
+#     supabase
+#     .table("ayat")
+#     .select("surah, ayah_number, arabic_text, full_description")
+#     .execute()
+#     .data
+# )
+
+
+# # -----------------------------
+# # Helpers
+# # -----------------------------
+
+# def clean_text(text):
+#     if not text:
+#         return ""
+
+#     # Remove HTML
+#     text = BeautifulSoup(
+#         str(text),
+#         "html.parser"
+#     ).get_text("\n", strip=True)
+
+#     return text.strip()
+
+
+# def save_txt(path, text):
+#     os.makedirs(
+#         os.path.dirname(path),
+#         exist_ok=True
+#     )
+
+#     with open(
+#         path,
+#         "w",
+#         encoding="utf-8"
+#     ) as f:
+#         f.write(text)
+
+
+# # -----------------------------
+# # Generate TXT files
+# # -----------------------------
+
+# BASE_FOLDER = r"C:\Users\nadee\Desktop\Descriptions"
+
+# for ayah in data:
+
+#     surah = ayah["surah"]
+#     ayah_number = ayah["ayah_number"]
+
+#     arabic_text = clean_text(ayah["arabic_text"])
+#     full_description = clean_text(ayah["full_description"])
+
+#     file_path = os.path.join(
+#         BASE_FOLDER,
+#         str(surah),
+#         f"{ayah_number}.txt"
+#     )
+
+#     save_txt(
+#         file_path,
+#         f"{arabic_text}\n\n{full_description}"
+#     )
+
+#     print(f"Created {file_path}")
+
+
 import os
-from bs4 import BeautifulSoup
-from supabase import create_client, Client
+from ollama import Client
 
-
-# -----------------------------
-# Supabase
-# -----------------------------
-
-url = os.environ["SUPABASE_URL"]
-key = os.environ["SUPABASE_KEY"]
-
-supabase: Client = create_client(url, key)
-
-data = (
-    supabase
-    .table("ayat")
-    .select("surah, ayah_number, arabic_text, full_description")
-    .execute()
-    .data
+client = Client(
+    host="https://ollama.com",
+    headers={"Authorization": f"Bearer f96fdccfc81841a1a6390b84500e47fb.GkyTRBVTIK3KQpCDBW3aIv_U"},
 )
+OLLAMA_MODEL = "gemma4:31b-cloud"
 
-
-# -----------------------------
-# Helpers
-# -----------------------------
-
-def clean_text(text):
-    if not text:
-        return ""
-
-    # Remove HTML
-    text = BeautifulSoup(
-        str(text),
-        "html.parser"
-    ).get_text("\n", strip=True)
-
-    return text.strip()
-
-
-def save_txt(path, text):
-    os.makedirs(
-        os.path.dirname(path),
-        exist_ok=True
-    )
-
-    with open(
-        path,
-        "w",
-        encoding="utf-8"
-    ) as f:
-        f.write(text)
-
-
-# -----------------------------
-# Generate TXT files
-# -----------------------------
-
-BASE_FOLDER = r"C:\Users\nadee\Desktop\Descriptions"
-
-for ayah in data:
-
-    surah = ayah["surah"]
-    ayah_number = ayah["ayah_number"]
-
-    arabic_text = clean_text(ayah["arabic_text"])
-    full_description = clean_text(ayah["full_description"])
-
-    file_path = os.path.join(
-        BASE_FOLDER,
-        str(surah),
-        f"{ayah_number}.txt"
-    )
-
-    save_txt(
-        file_path,
-        f"{arabic_text}\n\n{full_description}"
-    )
-
-    print(f"Created {file_path}")
-
-
-print("Done!")
+response = client.chat(
+    model=OLLAMA_MODEL,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(response.message.content)

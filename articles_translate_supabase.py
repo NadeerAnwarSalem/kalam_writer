@@ -25,7 +25,7 @@ Usage:
 
 import time
 from supabase import create_client, Client
-from ollama import chat
+from ollama import Client as cl
 import os
 # ---------------------------------------------------------------------------
 # Configuration
@@ -107,14 +107,18 @@ def db_column(language: str, field_key: str) -> str:
 
 def translate_text(text: str, source_language: str) -> str:
     """Translate a single piece of text out of `source_language` into the other language."""
-    resp = chat(
+    client = cl(
+    host="https://ollama.com",
+    headers={"Authorization": f"Bearer f96fdccfc81841a1a6390b84500e47fb.GkyTRBVTIK3KQpCDBW3aIv_U"},
+    )
+    resp = client.chat(
         model=OLLAMA_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPTS[source_language]},
             {"role": "user", "content": text},
         ]
     )
-    return resp.message.content.strip()
+    return resp.message.content
 
 
 def translate_article(article_data: dict, source_language: str) -> dict:
