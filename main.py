@@ -308,7 +308,8 @@ if not article_id:
                                         "author_id": st.session_state["user_id"],
                                         "language": article_language,
                                         "article_author": article_author,
-                                        "published_at": datetime.now(timezone.utc).isoformat()  
+                                        "published_at": datetime.now(timezone.utc).isoformat(), 
+                                        "tags": article_hashtags
                                     }
                                 ).execute()
 
