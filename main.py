@@ -425,15 +425,15 @@ if not article_id:
         #                 st.write("Start writing to see a preview of your article content here.")
 
 
-        # if st.button("Logout"):
-        #     supabase.auth.sign_out()
-        #     st.session_state["logged_in"] = False
-        #     st.session_state["user_email"] = None
-        #     st.session_state["user_id"] = None
-        #     st.session_state["username"] = None
-        #     cookies["refresh_token"] = ""
-        #     cookies.save()
-        #     st.rerun()
+        if st.button("Logout"):
+            supabase.auth.sign_out()
+            st.session_state["logged_in"] = False
+            st.session_state["user_email"] = None
+            st.session_state["user_id"] = None
+            st.session_state["username"] = None
+            cookies["refresh_token"] = ""
+            cookies.save()
+            st.rerun()
 else:
     def fetch_article_content(article_id: str):
         """Fetch full article content from Supabase using ID."""
