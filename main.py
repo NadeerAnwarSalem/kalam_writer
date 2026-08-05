@@ -168,8 +168,8 @@ if not article_id:
                     with articles_tab:
                         st.write("List of Articles")
                         articles_data = supabase.table("articles").select("*").execute().data
-                        lang = articles_data["language"]
-                        articles = [(article["id"], article["article_author"], article[f"{lang.lower()}_title"], article["status"], "View") for article in articles_data]
+                        
+                        articles = [(article["id"], article["article_author"], article[f"{article["language"].lower()}_title"], article["status"], "View") for article in articles_data]
                         df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Actions"])  
                         df_articles["Actions"] = df_articles["ID"].apply(
                             lambda article_id: f"/Article_Reader?article_id={article_id}"
@@ -209,8 +209,7 @@ if not article_id:
         with manage_articles_tab:
             st.write("Manage Articles")
             articles_data = supabase.table("articles").select("*").eq("author_id", st.session_state.get("user_id")).execute().data
-            lang = articles_data["language"]
-            articles = [(article["id"], article["article_author"], article[f"{lang.lower()}_title"], article["status"], "View", "Actions") for article in articles_data]
+            articles = [(article["id"], article["article_author"], article[f"{article["language"].lower()}_title"], article["status"], "View", "Actions") for article in articles_data]
             df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Read Article", "Actions"])  
             df_articles["Options"] = df_articles["ID"].apply(
                 lambda article_id: f"/Article_Reader?article_id={article_id}"
