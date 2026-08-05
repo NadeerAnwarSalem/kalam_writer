@@ -49,12 +49,13 @@ def update_article_status(article_id: str, new_status: bool):
 
 @st.dialog("Edit Article Dialog", dismissible=True)
 def edit_article_dialog(article_data: dict):
-    st.title(f"Edit Article: {article_data['title']}")
-    new_title = st.text_input("Title", value=article_data['title'], disabled=True)
-    new_summary = st.text_area("Summary", value=article_data['summary'])
+    lang = article_data["language"]
+    st.title(f"Edit Article: {article_data[f"{lang.lower()}_title"]}")
+    new_title = st.text_input("Title", value=article_data[f"{lang.lower()}_title"], disabled=True)
+    new_summary = st.text_area("Summary", value=article_data[f"{lang.lower()}_summary"])
     write, pdf, word, txt = st.tabs(["Write", "PDF", "Word", "Text"])
     with write:
-        new_content = st.text_area("Content", value=article_data['content'], max_chars=10000, height=300)
+        new_content = st.text_area("Content", value=article_data[f"{lang.lower()}_content"], max_chars=10000, height=300)
     with pdf:
         uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"])
         if uploaded_pdf:
@@ -75,9 +76,9 @@ def edit_article_dialog(article_data: dict):
     if st.button("Save Changes"):
         # Update the article in Supabase, and handle image upload if a new image is provided
         updated_data = {
-            "title": new_title,
-            "summary": new_summary,
-            "content": new_content,
+            f"{lang.lower()}_title": new_title,
+            f"{lang.lower()}_summary": new_summary,
+            f"{lang.lower()}_content": new_content,
             "article_author": new_author,
             "tags": new_article_tags
         }
