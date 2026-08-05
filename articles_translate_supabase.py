@@ -27,7 +27,7 @@ import time
 from supabase import create_client, Client
 from ollama import Client as cl
 import os
-import streamlit as st
+from streamlit import secrets
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ def translate_text(text: str, source_language: str) -> str:
     """Translate a single piece of text out of `source_language` into the other language."""
     client = cl(
     host="https://ollama.com",
-    headers={"Authorization": f"Bearer {st.secrets.get("OLLAMA_API")}"},
+    headers={"Authorization": f"Bearer {secrets.get("OLLAMA_API")}"},
     )
     resp = client.chat(
         model=OLLAMA_MODEL,
