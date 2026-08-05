@@ -482,11 +482,14 @@ else:
         # 2. Fetch full article data from Supabase
         article = fetch_article_content(article_id)
         if article:
-            title = article.get("title", "Untitled Article")
-            content = article.get("content", "No content available.")
+            lang = article["language"]
+            title = article.get(f"{lang.lower()}_title", "Untitled Article")
+            summary = article.get(f"{lang.lower()}_summary", "No Summary available.")
+            content = article.get(f"{lang.lower()}_content", "No content available.")
 
             # Header section
             st.title(title)
+            st.subheader(summary)
             st.write(f"Created by {article.get('article_author', 'Unknown Author')}")
             
             st.caption(f"Article ID: `{article['id']}`")
