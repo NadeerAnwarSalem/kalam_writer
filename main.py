@@ -40,16 +40,117 @@ if not st.session_state.get("logged_in") and cookies.get("refresh_token"):
         cookies["refresh_token"] = ""
         cookies.save()
 
-def update_article_status(article_id: str, new_status: bool):
-    """Update a specific article's status in Supabase."""
-    supabase.table("articles").update({"status": new_status}).eq(
-        "id", article_id
-    ).execute()
+
+def update_article_status(article_id: str, new_status: str) -> bool:
+    """Update a specific article's status in Supabase. Returns True on success."""
+    try:
+        supabase.table("articles").update({"status": new_status}).eq(
+            "id", article_id
+        ).execute()
+        return True
+    except Exception as exc:
+        st.error(f"Failed to update status: {exc}")
+        return False
+
+
+def translate_and_update_article(article_id: str) -> bool:
+    """Translate an approved article and update the translated fields in Supabase.
+
+    Returns True on success, False on any failure (fetch, translation, or write).
+    Does NOT re-translate if the target-language fields are already populated,
+    so re-approving an article won't silently clobber a manually corrected
+    translation.
+    """
+    try:
+        article_response = (
+            supabase.table("articles").select("*").eq("id", article_id).single().execute()
+        )
+    except Exception as exc:
+        st.warning(f"Could not load article for translation: {exc}")
+        return False
+
+    if not article_response.data:
+        st.warning("Article not found for translation.")
+        return False
+
+    article = article_response.data
+    source_language = article["language"]
+    target_language = other_language(source_language)
+
+    # Skip re-translation if the target language content already exists.
+    existing_target_title = article.get(f"{target_language.lower()}_title")
+    if existing_target_title:
+        return True
+
+    payload = {
+        "title": article[f"{source_language.lower()}_title"],
+        "summary": article[f"{source_language.lower()}_summary"],
+        "content": article[f"{source_language.lower()}_content"],
+    }
+
+    try:
+        translated_article = translate_article(payload, source_language)
+    except Exception as exc:
+        st.warning(f"Translation failed: {exc}")
+        return False
+
+    update_data = {
+        f"{target_language.lower()}_title": translated_article["title"],
+        f"{target_language.lower()}_summary": translated_article["summary"],
+        f"{target_language.lower()}_content": translated_article["content"],
+    }
+
+    try:
+        supabase.table("articles").update(update_data).eq("id", article_id).execute()
+    except Exception as exc:
+        st.warning(f"Translation succeeded but saving it failed: {exc}")
+        return False
+
+    return True
+
+
+def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_key: str):
+    """Apply status edits from a data_editor, translating on approval.
+
+    Clears the editor's edited_rows afterward and reruns, so the same edits
+    can't be re-applied (and re-translated) on a later, unrelated rerun.
+    """
+    any_processed = False
+    for index, change in edited_rows.items():
+        if "Status" not in change:
+            continue
+
+        row_article_id = df_articles.iloc[index]["ID"]
+        new_status = change["Status"]
+
+        with st.spinner("Updating status..."):
+            status_ok = update_article_status(row_article_id, new_status)
+
+        if not status_ok:
+            continue
+
+        if new_status == "approved":
+            with st.spinner("Translating and updating article..."):
+                translation_ok = translate_and_update_article(row_article_id)
+            if translation_ok:
+                st.success("Status updated and article translated successfully!")
+            else:
+                st.warning("Status updated, but translation could not be completed.")
+        else:
+            st.success("Status updated successfully!")
+
+        any_processed = True
+
+    if any_processed:
+        # Prevent the same edits from being re-applied on the next rerun.
+        st.session_state[editor_key]["edited_rows"] = {}
+        st.rerun()
+
 
 @st.dialog("Edit Article Dialog", dismissible=True)
 def edit_article_dialog(article_data: dict):
     lang = article_data["language"]
-    st.title(f"Edit Article: {article_data[f"{lang.lower()}_title"]}")
+    st.title(f"Edit Article: {article_data[f'{lang.lower()}_title']}")
     new_title = st.text_input("Title", value=article_data[f"{lang.lower()}_title"], disabled=True)
     new_summary = st.text_area("Summary", value=article_data[f"{lang.lower()}_summary"])
     write, pdf, word, txt = st.tabs(["Write", "PDF", "Word", "Text"])
@@ -73,7 +174,6 @@ def edit_article_dialog(article_data: dict):
     # new_image = st.file_uploader("Upload New Image", type=["png", "jpg", "jpeg"])
 
     if st.button("Save Changes"):
-        # Update the article in Supabase, and handle image upload if a new image is provided
         updated_data = {
             f"{lang.lower()}_title": new_title,
             f"{lang.lower()}_summary": new_summary,
@@ -81,10 +181,14 @@ def edit_article_dialog(article_data: dict):
             "article_author": new_author,
             "tags": new_article_tags
         }
-        supabase.table("articles").update(updated_data).eq("id", article_data['id']).execute()
-        st.success("Article updated successfully!")
-        st.rerun()
-          
+        try:
+            supabase.table("articles").update(updated_data).eq("id", article_data['id']).execute()
+            st.success("Article updated successfully!")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Failed to update article: {exc}")
+
+
 article_id = st.query_params.get("article_id")
 
 if not article_id:
@@ -96,14 +200,18 @@ if not article_id:
             submitted = st.form_submit_button("Login")
 
             if submitted:
-                response = supabase.auth.sign_in_with_password(
-                    {
-                        "email": email,
-                        "password": password,
-                    }
-                )
+                try:
+                    response = supabase.auth.sign_in_with_password(
+                        {
+                            "email": email,
+                            "password": password,
+                        }
+                    )
+                except Exception as exc:
+                    response = None
+                    st.error(f"Login failed: {exc}")
 
-                if response.user:
+                if response and response.user:
                     st.success("Login successful!")
                     st.session_state["logged_in"] = True
                     st.session_state["user_email"] = response.user.email
@@ -114,16 +222,17 @@ if not article_id:
                     cookies["refresh_token"] = response.session.refresh_token
                     cookies.save()
                     st.rerun()
-                else:
-                    st.error(f"Login failed!")
+                elif response is not None:
+                    st.error("Login failed!")
     else:
         if st.button("refresh"):
             st.rerun()
-        #admin dashboard code here
+
+        # ---- admin dashboard ----
         if st.session_state.get("user_role") == "admin":
             st.write(f"Welcome, {st.session_state['username']}! (Admin)")
 
-            create_user_tab, manage_data_tab = st.tabs(["Create User", "Manage Data"])    
+            create_user_tab, manage_data_tab = st.tabs(["Create User", "Manage Data"])
             with create_user_tab:
                 with st.expander("Create User"):
                     with st.form("create_user_form"):
@@ -135,23 +244,29 @@ if not article_id:
                         create_submitted = st.form_submit_button("Create User")
 
                         if create_submitted:
-                            response = supabase_admin.auth.admin.create_user(
-                                {
-                                    "email": new_email,
-                                    "password": new_password,
-                                    "email_confirm": True,
-                                    "user_metadata": {
-                                        "username": new_username
-                                    },
-                                    "app_metadata": {
-                                        "role": new_role
+                            try:
+                                response = supabase_admin.auth.admin.create_user(
+                                    {
+                                        "email": new_email,
+                                        "password": new_password,
+                                        "email_confirm": True,
+                                        "user_metadata": {
+                                            "username": new_username
+                                        },
+                                        "app_metadata": {
+                                            "role": new_role
+                                        }
                                     }
-                                }
-                            )
-                            if response.user:
+                                )
+                            except Exception as exc:
+                                response = None
+                                st.error(f"Failed to create user: {exc}")
+
+                            if response and response.user:
                                 st.success(f"User {new_email} created successfully!")
-                            else:
-                                st.error(f"Failed to create user!")
+                            elif response is not None:
+                                st.error("Failed to create user!")
+
             with manage_data_tab:
                 with st.container(border=True, height=500):
                     users_tab, articles_tab = st.tabs(["Users", "Articles"])
@@ -161,73 +276,88 @@ if not article_id:
                         users = [(user.id, user.email, user.user_metadata.get("username", "")) for user in users]
                         df = pd.DataFrame(users, columns=["User ID", "Email", "Username"])
                         if users:
-                                st.table(df)
+                            st.table(df)
                         else:
                             st.write("No users found.")
 
                     with articles_tab:
                         st.write("List of Articles")
                         articles_data = supabase.table("articles").select("*").execute().data
-                        
-                        articles = [(article["id"], article["article_author"], article[f"{article["language"].lower()}_title"], article["status"], "View") for article in articles_data]
-                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Actions"])  
+
+                        articles = [
+                            (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "View")
+                            for a in articles_data
+                        ]
+                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Actions"])
                         df_articles["Actions"] = df_articles["ID"].apply(
-                            lambda article_id: f"/Article_Reader?article_id={article_id}"
-                        )
-                        edited_df = st.data_editor(df_articles, use_container_width=True, column_order=["Article Author", "Title", "Status", "Actions"], column_config={
-                        "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
-                        "Title": st.column_config.TextColumn("Title", disabled=True),
-                        "Status": st.column_config.SelectboxColumn(
-                            "Status",
-                            help="Toggle to change article status",
-                            options=["pending", "approved", "rejected"],
-                        ),
-                        "Actions": st.column_config.LinkColumn(
-                            "Read Article",
-                            display_text="Read Article",
-                        ),
-                        },
-                        disabled=["Article Author", "Title"],  # Prevent editing ID and Name
-                        hide_index=True,
-                        key="admin_article_table_editor",)  
-
-                        changes = st.session_state.get("admin_article_table_editor", {}).get(
-                            "edited_rows", {}
+                            lambda aid: f"/Article_Reader?article_id={aid}"
                         )
 
-                        if changes:
-                            for index, change in changes.items():
-                                if "Status" in change:
-                                    article_id = df_articles.iloc[index]["ID"] 
-                                    new_status = change["Status"]
-                                    update_article_status(article_id, new_status)
-                            
-                            st.toast("Article statuses updated successfully!")
+                        admin_editor_key = "admin_article_table_editor"
+                        st.data_editor(
+                            df_articles,
+                            use_container_width=True,
+                            column_order=["Article Author", "Title", "Status", "Actions"],
+                            column_config={
+                                "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
+                                "Title": st.column_config.TextColumn("Title", disabled=True),
+                                "Status": st.column_config.SelectboxColumn(
+                                    "Status",
+                                    help="Toggle to change article status",
+                                    options=["pending", "approved", "rejected"],
+                                ),
+                                "Actions": st.column_config.LinkColumn(
+                                    "Read Article",
+                                    display_text="Read Article",
+                                ),
+                            },
+                            disabled=["Article Author", "Title"],
+                            hide_index=True,
+                            key=admin_editor_key,
+                        )
 
-        #user dashboard code here
+                        edited_rows = st.session_state.get(admin_editor_key, {}).get("edited_rows", {})
+                        if edited_rows:
+                            process_status_changes(edited_rows, df_articles, admin_editor_key)
+
+        # ---- user dashboard ----
         manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])
         with manage_articles_tab:
             st.write("Manage Articles")
-            articles_data = supabase.table("articles").select("*").eq("author_id", st.session_state.get("user_id")).execute().data
-            articles = [(article["id"], article["article_author"], article[f"{article["language"].lower()}_title"], article["status"], "View", "Actions") for article in articles_data]
-            df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Read Article", "Actions"])  
-            df_articles["Options"] = df_articles["ID"].apply(
-                lambda article_id: f"/Article_Reader?article_id={article_id}"
+            articles_data = (
+                supabase.table("articles")
+                .select("*")
+                .eq("author_id", st.session_state.get("user_id"))
+                .execute()
+                .data
             )
-            edited_df = st.data_editor(df_articles, width="stretch", column_order=["Article Author", "Title", "Status", "Options"], column_config={
-            "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
-            "Title": st.column_config.TextColumn("Title", disabled=True),
-            "Status": st.column_config.TextColumn("Status", disabled=True),
-            "Options": st.column_config.LinkColumn(
-                "Configure",
-                display_text="Options",
-            ),
-            },
-            disabled=["Article Author", "Title"],  # Prevent editing ID and Name
-            hide_index=True,
-            key="article_table_editor",)  
+            articles = [
+                (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "View", "Actions")
+                for a in articles_data
+            ]
+            df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Read Article", "Actions"])
+            df_articles["Options"] = df_articles["ID"].apply(
+                lambda aid: f"/Article_Reader?article_id={aid}"
+            )
+            st.data_editor(
+                df_articles,
+                width="stretch",
+                column_order=["Article Author", "Title", "Status", "Options"],
+                column_config={
+                    "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
+                    "Title": st.column_config.TextColumn("Title", disabled=True),
+                    "Status": st.column_config.TextColumn("Status", disabled=True),
+                    "Options": st.column_config.LinkColumn(
+                        "Configure",
+                        display_text="Options",
+                    ),
+                },
+                disabled=["Article Author", "Title"],
+                hide_index=True,
+                key="article_table_editor",
+            )
 
-        with create_article_tab:        
+        with create_article_tab:
             with st.expander("Create New Article", expanded=True):
                 left, right = st.columns([3, 2])
                 with left:
@@ -289,7 +419,6 @@ if not article_id:
                                     "english_summary": article_summary,
                                     "english_content": article_content
                                 }
-
                             article_dialog(article_data)
 
                         if create_article_submitted:
@@ -300,41 +429,18 @@ if not article_id:
                             elif not article_image:
                                 st.error("Please upload an article image.")
                             else:
-                                status, image_url = upload_file_to_r2(
-                                    article_image,
-                                    f"{article_title.lower().replace(' ', '-')}.jpg",
-                                    f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
-                                )
+                                try:
+                                    status, image_url = upload_file_to_r2(
+                                        article_image,
+                                        f"{article_title.lower().replace(' ', '-')}.jpg",
+                                        f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
+                                    )
+                                except Exception as exc:
+                                    status, image_url = None, None
+                                    st.error(f"Image upload failed: {exc}")
 
-                                with st.spinner("Uploading article..."):
-                                    try:
-                                        article_to_translate = {"title": article_title, "summary": article_summary, "content": article_content}
-                                        translated_article = translate_article(article_to_translate, article_language)
-                                    except:
-                                        translated_article = None
-                                        st.warning("Something might have gone wrong, but its all good!  :)")
-
-                                    if translated_article:
-                                        other_lang = other_language(article_language)
-                                        insert_data = {
-                                            "slug": article_title.lower().replace(" ", "-"),
-                                            f"{article_language.lower()}_title": article_title,
-                                            f"{article_language.lower()}_summary": article_summary,
-                                            f"{article_language.lower()}_content": article_content,
-                                            f"{other_lang.lower()}_title":translated_article["title"],
-                                            f"{other_lang.lower()}_summary":translated_article["summary"],
-                                            f"{other_lang.lower()}_content":translated_article["content"],
-                                            "status": "pending",
-                                            "featured_image_url": image_url if status == 200 else None,
-                                            "reading_time_minutes": calculate_reading_time(article_content),
-                                            "author_id": st.session_state["user_id"],
-                                            "language": article_language,
-                                            "article_author": article_author,
-                                            "published_at": datetime.now(timezone.utc).isoformat(),
-                                            "tags": article_hashtags
-                                            #audio later
-                                        }
-                                    else:
+                                if status is not None:
+                                    with st.spinner("Uploading article..."):
                                         insert_data = {
                                             "slug": article_title.lower().replace(" ", "-"),
                                             f"{article_language.lower()}_title": article_title,
@@ -348,17 +454,19 @@ if not article_id:
                                             "article_author": article_author,
                                             "published_at": datetime.now(timezone.utc).isoformat(),
                                             "tags": article_hashtags
-                                            #audio later
+                                            # audio later
                                         }
+                                        try:
+                                            response = supabase.table("articles").insert(insert_data).execute()
+                                        except Exception as exc:
+                                            response = None
+                                            st.error(f"Failed to create article: {exc}")
 
-                                    response = supabase.table("articles").insert(insert_data).execute()
-
-                                if response.data:
-                                    st.success(f"Article '{article_title}' created successfully!")
-                                else:
-                                    st.error("Failed to create article!")
+                                    if response and response.data:
+                                        st.success(f"Article '{article_title}' created successfully!")
+                                    elif response is not None:
+                                        st.error("Failed to create article!")
                 with right:
-                    
                     if image_bytes:
                         image = base64.b64encode(image_bytes).decode()
                         background = f"data:image/png;base64,{image}"
@@ -438,7 +546,7 @@ if not article_id:
                                 {article_summary if article_summary else "Your article summary will appear here..."}
                             </div>
                             <div class="meta">
-                                &nbsp;&nbsp; • &nbsp;&nbsp; {article_author if article_author else "Author"} 
+                                &nbsp;&nbsp; • &nbsp;&nbsp; {article_author if article_author else "Author"}
                             </div>
                             <div>
                                 &nbsp;&nbsp; • &nbsp;&nbsp; ⏱ {article_read_time if article_read_time else "0"} minutes read
@@ -463,7 +571,6 @@ if not article_id:
                     else:
                         st.write("Start writing to see a preview of your article content here.")
 
-
         if st.button("Logout"):
             supabase.auth.sign_out()
             st.session_state["logged_in"] = False
@@ -484,13 +591,7 @@ else:
         )
         return res.data[0] if res.data else None
 
-
-    # 1. Read URL Query Parameter
-    article_id = st.query_params.get("article_id")
-    
-
     if article_id:
-        # 2. Fetch full article data from Supabase
         article = fetch_article_content(article_id)
         if article:
             lang = article["language"]
@@ -498,43 +599,41 @@ else:
             summary = article.get(f"{lang.lower()}_summary", "No Summary available.")
             content = article.get(f"{lang.lower()}_content", "No content available.")
 
-            # Header section
             st.title(title)
             st.subheader(summary)
             st.write(f"Created by {article.get('article_author', 'Unknown Author')}")
-            
             st.caption(f"Article ID: `{article['id']}`")
 
             download_col, edit_col, delete_col = st.columns([1, 1, 1])
             with download_col:
-                # Top Action Bar: Download Button
                 st.download_button(
                     label="📥 Download as .txt file",
-                    data=f"{title}\n\n{content}",  # Text file content payload
+                    data=f"{title}\n\n{content}",
                     file_name=f"{title.lower().replace(' ', '_')}.txt",
                     mime="text/plain",
                     type="primary",
                 )
 
             with edit_col:
-                # edit button
                 if st.button("✏️ Edit Article"):
-                    edit_article_dialog(article)  # Call the dialog function
+                    edit_article_dialog(article)
+
             with delete_col:
-                # delete button
                 if st.button("🗑 Delete Article"):
-                    # Delete the article from Supabase
-                    supabase.table("articles").delete().eq("id", article_id).execute()
-                    delete_file_from_r2(f"{title.lower().replace(' ', '-')}.jpg", f"articles/{article['author_id']}/{title.lower().replace(' ', '-')}")
-                    st.success(f"Article '{title}' deleted successfully!")
-                    st.write("Redirecting to the main page...")
-                    st.rerun()  # Refresh the page to reflect changes
+                    try:
+                        supabase.table("articles").delete().eq("id", article_id).execute()
+                        delete_file_from_r2(
+                            f"{title.lower().replace(' ', '-')}.jpg",
+                            f"articles/{article['author_id']}/{title.lower().replace(' ', '-')}"
+                        )
+                        st.success(f"Article '{title}' deleted successfully!")
+                        st.write("Redirecting to the main page...")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed to delete article: {exc}")
 
             st.divider()
-
-            # 3. Read Article on screen
             st.markdown(content)
-
         else:
             st.error("Article not found in database.")
     else:
