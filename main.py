@@ -1,12 +1,11 @@
-import os
 import pandas as pd
 
 from datetime import datetime, timezone
-from PIL import Image
 from utils import *
 from supabase import create_client, Client
 from tag_options import TAG_OPTIONS
 from streamlit_cookies_manager import EncryptedCookieManager
+from articles_translate_supabase import translate_article, other_language
 
 url: str = st.secrets.get("SUPABASE_URL")
 key: str = st.secrets.get("SUPABASE_KEY")
@@ -307,23 +306,52 @@ if not article_id:
                                     f"articles/{st.session_state['user_id']}/{article_title.lower().replace(' ', '-')}"
                                 )
 
-                                insert_data = {
-                                    "slug": article_title.lower().replace(" ", "-"),
-                                    f"{article_language.lower()}_title": article_title,
-                                    f"{article_language.lower()}_summary": article_summary,
-                                    f"{article_language.lower()}_content": article_content,
-                                    "status": "pending",
-                                    "featured_image_url": image_url if status == 200 else None,
-                                    "reading_time_minutes": calculate_reading_time(article_content),
-                                    "author_id": st.session_state["user_id"],
-                                    "language": article_language,
-                                    "article_author": article_author,
-                                    "published_at": datetime.now(timezone.utc).isoformat(),
-                                    "tags": article_hashtags
-                                    #audio later
-                                }
+                                with st.spinner("Uploading article..."):
+                                    try:
+                                        article_to_translate = {"title": article_title, "summary": article_summary, "content": article_content}
+                                        translated_article = translate_article(article_to_translate, article_language)
+                                    except:
+                                        translated_article = None
+                                        st.warning("Something might have gone wrong, but its all good!  :)")
 
-                                response = supabase.table("articles").insert(insert_data).execute()
+                                    if translated_article:
+                                        other_lang = other_language(article_language)
+                                        insert_data = {
+                                            "slug": article_title.lower().replace(" ", "-"),
+                                            f"{article_language.lower()}_title": article_title,
+                                            f"{article_language.lower()}_summary": article_summary,
+                                            f"{article_language.lower()}_content": article_content,
+                                            f"{other_lang.lower()}_title":translated_article["title"],
+                                            f"{other_lang.lower()}_summary":translated_article["summary"],
+                                            f"{other_lang.lower()}_content":translated_article["content"],
+                                            "status": "pending",
+                                            "featured_image_url": image_url if status == 200 else None,
+                                            "reading_time_minutes": calculate_reading_time(article_content),
+                                            "author_id": st.session_state["user_id"],
+                                            "language": article_language,
+                                            "article_author": article_author,
+                                            "published_at": datetime.now(timezone.utc).isoformat(),
+                                            "tags": article_hashtags
+                                            #audio later
+                                        }
+                                    else:
+                                        insert_data = {
+                                            "slug": article_title.lower().replace(" ", "-"),
+                                            f"{article_language.lower()}_title": article_title,
+                                            f"{article_language.lower()}_summary": article_summary,
+                                            f"{article_language.lower()}_content": article_content,
+                                            "status": "pending",
+                                            "featured_image_url": image_url if status == 200 else None,
+                                            "reading_time_minutes": calculate_reading_time(article_content),
+                                            "author_id": st.session_state["user_id"],
+                                            "language": article_language,
+                                            "article_author": article_author,
+                                            "published_at": datetime.now(timezone.utc).isoformat(),
+                                            "tags": article_hashtags
+                                            #audio later
+                                        }
+
+                                    response = supabase.table("articles").insert(insert_data).execute()
 
                                 if response.data:
                                     st.success(f"Article '{article_title}' created successfully!")
