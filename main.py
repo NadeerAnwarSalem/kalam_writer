@@ -331,7 +331,7 @@ if not article_id:
                         )
 
                         df_articles["Speech Credits"] = [
-                            len((a.get("summary") or "") + (a.get("content") or ""))
+                            len((a.get("arabic_summary") or "") + (a.get("arabic_content") or "") + (a.get("english_summary") or "") + (a.get("english_content") or ""))
                             for a in articles_data
                         ]
 
