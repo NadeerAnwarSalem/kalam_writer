@@ -11,3 +11,4 @@ streamlit-cookies-manager
 ollama
 starlette<1.4.0
 elevenlabs
+tempfile

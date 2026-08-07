@@ -1,4 +1,6 @@
 import pandas as pd
+import random
+import tempfile
 
 from datetime import datetime, timezone
 from utils import *
@@ -7,6 +9,8 @@ from tag_options import TAG_OPTIONS
 from streamlit_cookies_manager import EncryptedCookieManager
 from articles_translate_supabase import translate_article, other_language
 from elevenlabs import ElevenLabs
+from r2_client import upload_audio
+
 
 url: str = st.secrets.get("SUPABASE_URL")
 key: str = st.secrets.get("SUPABASE_KEY")
@@ -20,23 +24,22 @@ elevenlabs_client = ElevenLabs(api_key=EL_API_KEY)
 elevenlabs_user = elevenlabs_client.user.get()
 
 ar_voices = [
-    "XdoLPWNt7ytn6BtU4FBf", #abdullah
-    "fkqevZRU7Xj52dY1CTkq", #hijazi
-    "FOyke8LaC5kHLkRFE8oG", #fahad
+    "XdoLPWNt7ytn6BtU4FBf",  # abdullah
+    "fkqevZRU7Xj52dY1CTkq",  # hijazi
+    "FOyke8LaC5kHLkRFE8oG",  # fahad
     "vszNunPGBVqJg1Qd4H7Z",
-    "xvhpbk8otnNHtT3fjCpr"
-
+    "xvhpbk8otnNHtT3fjCpr",
 ]
 
 en_voices = [
-    "TTmUgRoiAUdn043OgRax", #eddie
-    "qSeXEcewz7tA0Q0qk9fH", #viktoria
-    "oaGwHLz3csUaSnc2NBD4", #benedict
-    "GrVxA7Ub86nJH91Viyiv"
+    "TTmUgRoiAUdn043OgRax",  # eddie
+    "qSeXEcewz7tA0Q0qk9fH",  # viktoria
+    "oaGwHLz3csUaSnc2NBD4",  # benedict
+    "GrVxA7Ub86nJH91Viyiv",
 ]
 
-OUTPUT_ROOT = Path("C:/Users/nadee/OneDrive/Desktop/descriptions")
-
+OUTPUT_ROOT = Path(st.secrets.get("AUDIO_OUTPUT_DIR", tempfile.gettempdir())) / "kalam_audio"
+OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
 image_bytes = None  # Initialize image_bytes to None
 img_path = Path(__file__).parent / "bg_img.jpg"
@@ -48,17 +51,18 @@ cookies = EncryptedCookieManager(
 if not cookies.ready():
     st.stop()  # wait for cookies to load before rendering anything else
 
-def generate_audio(text, voice, out_path):
-        audio_stream = elevenlabs_client.text_to_speech.convert(
-                 voice_id=voice,
-                 text=text,
-                 model_id=MODEL_ID,
-                 output_format="mp3_44100_128",
-             )
-     
-        with open(out_path, "wb") as f:
-            for chunk in audio_stream:
-                f.write(chunk)
+
+def generate_audio(text: str, voice: str, out_path: Path):
+    """Generate TTS audio for `text` with ElevenLabs and write it to out_path."""
+    audio_stream = elevenlabs_client.text_to_speech.convert(
+        voice_id=voice,
+        text=text,
+        model_id=MODEL_ID,
+        output_format="mp3_44100_128",
+    )
+    with open(out_path, "wb") as f:
+        for chunk in audio_stream:
+            f.write(chunk)
 
 if not st.session_state.get("logged_in") and cookies.get("refresh_token"):
     try:
@@ -146,11 +150,92 @@ def translate_and_update_article(article_id: str) -> bool:
     return True
 
 
+def generate_and_upload_article_audio(article_id: str) -> bool:
+    """Generate Arabic + English narration audio for an article and store the URLs.
+
+    Returns True on success, False on any failure. Skips generation (and
+    counts as success) if both audio URLs are already set, so re-approving
+    an article won't burn ElevenLabs credits or overwrite existing audio.
+    """
+    try:
+        article_response = (
+            supabase.table("articles").select("*").eq("id", article_id).single().execute()
+        )
+    except Exception as exc:
+        st.warning(f"Could not load article for audio generation: {exc}")
+        return False
+
+    if not article_response.data:
+        st.warning("Article not found for audio generation.")
+        return False
+
+    article = article_response.data
+
+    if article.get("ar_audio_url") and article.get("en_audio_url"):
+        return True
+
+    ar_title = article.get("arabic_title")
+    ar_summary = article.get("arabic_summary")
+    ar_content = article.get("arabic_content")
+    en_title = article.get("english_title")
+    en_summary = article.get("english_summary")
+    en_content = article.get("english_content")
+
+    if not all([ar_title, ar_summary, ar_content, en_title, en_summary, en_content]):
+        st.warning("Cannot generate audio: article is missing bilingual title/summary/content.")
+        return False
+
+    if not article.get("slug") or not article.get("author_id"):
+        st.warning("Cannot generate audio: article is missing a slug or author_id.")
+        return False
+
+    ar_voice = random.choice(ar_voices)
+    en_voice = random.choice(en_voices)
+
+    ar_out_path = OUTPUT_ROOT / "ar_articles" / ar_title / "title.mp3"
+    en_out_path = OUTPUT_ROOT / "en_articles" / en_title / "title.mp3"
+
+    try:
+        ar_out_path.parent.mkdir(parents=True, exist_ok=True)
+        en_out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ar_txt = "\n\n".join([ar_summary, ar_content])
+        en_txt = "\n\n".join([en_summary, en_content])
+
+        generate_audio(ar_txt, ar_voice, ar_out_path)
+        ar_r2_key = f"articles/{article['author_id']}/{article['slug']}/arabic_audio.mp3"
+        ar_audio_url = upload_audio(ar_out_path, ar_r2_key)
+
+        generate_audio(en_txt, en_voice, en_out_path)
+        en_r2_key = f"articles/{article['author_id']}/{article['slug']}/english_audio.mp3"
+        en_audio_url = upload_audio(en_out_path, en_r2_key)
+    except Exception as exc:
+        st.warning(f"Audio generation failed: {exc}")
+        return False
+
+    if not ar_audio_url or not en_audio_url:
+        st.warning("Audio generation did not return a usable URL for one or both languages.")
+        return False
+
+    payload = {
+        "ar_audio_url": ar_audio_url,
+        "en_audio_url": en_audio_url,
+    }
+    try:
+        supabase.table("articles").update(payload).eq("id", article_id).execute()
+    except Exception as exc:
+        st.warning(f"Audio was generated but saving the URLs failed: {exc}")
+        return False
+
+    return True
+
+
 def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_key: str):
-    """Apply status edits from a data_editor, translating on approval.
+    """Apply status edits from a data_editor, translating and generating audio on approval.
 
     Clears the editor's edited_rows afterward and reruns, so the same edits
-    can't be re-applied (and re-translated) on a later, unrelated rerun.
+    can't be re-applied (and re-translated/re-narrated) on a later,
+    unrelated rerun.
     """
     any_processed = False
     for index, change in edited_rows.items():
@@ -169,8 +254,15 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
         if new_status == "approved":
             with st.spinner("Translating and updating article..."):
                 translation_ok = translate_and_update_article(row_article_id)
+
             if translation_ok:
-                st.success("Status updated and article translated successfully!")
+                with st.spinner("Generating audio for article..."):
+                    audio_ok = generate_and_upload_article_audio(row_article_id)
+
+                if audio_ok:
+                    st.success("Status updated, article translated, and audio generated successfully!")
+                else:
+                    st.warning("Status updated and article translated, but audio generation could not be completed.")
             else:
                 st.warning("Status updated, but translation could not be completed.")
         else:
@@ -329,9 +421,13 @@ if not article_id:
                         df_articles["Actions"] = df_articles["ID"].apply(
                             lambda aid: f"/Article_Reader?article_id={aid}"
                         )
-
                         df_articles["Speech Credits"] = [
-                            len((a.get("arabic_summary") or "") + (a.get("arabic_content") or "") + (a.get("english_summary") or "") + (a.get("english_content") or ""))
+                            len(
+                                (a.get("arabic_summary") or "")
+                                + (a.get("arabic_content") or "")
+                                + (a.get("english_summary") or "")
+                                + (a.get("english_content") or "")
+                            )
                             for a in articles_data
                         ]
 
@@ -353,8 +449,9 @@ if not article_id:
                                     display_text="Read Article",
                                 ),
                                 "Speech Credits": st.column_config.TextColumn(
-                                    "Speech Credits"
-                                )
+                                    "Speech Credits",
+                                    help="Approx. ElevenLabs characters this article will use when narrated",
+                                ),
                             },
                             disabled=["Article Author", "Title", "Speech Credits"],
                             hide_index=True,
@@ -366,15 +463,19 @@ if not article_id:
                             process_status_changes(edited_rows, df_articles, admin_editor_key)
 
         reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
-
         if reset_timestamp:
-            # Convert Unix timestamp to readable UTC date
             renewal_date = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
         else:
             renewal_date = "No renewal date available (e.g., custom enterprise or inactive plan)."
 
-        el_remaining_credits = elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
-        st.markdown(f"Your Elevenlabs credits remaining: *{el_remaining_credits}* ({elevenlabs_user.subscription.character_count} / {elevenlabs_user.subscription.character_limit}). Renewal date: {renewal_date}")
+        el_remaining_credits = (
+            elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
+        )
+        st.markdown(
+            f"Your ElevenLabs credits remaining: *{el_remaining_credits}* "
+            f"({elevenlabs_user.subscription.character_count} / {elevenlabs_user.subscription.character_limit}). "
+            f"Renewal date: {renewal_date}"
+        )
 
         # ---- user dashboard ----
         manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])
