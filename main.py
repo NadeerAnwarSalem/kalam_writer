@@ -371,7 +371,7 @@ if not article_id:
             # Convert Unix timestamp to readable UTC date
             renewal_date = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
         else:
-            renewal_date = "No renewal date available (e.g., custom enterprise or inactive plan).")
+            renewal_date = "No renewal date available (e.g., custom enterprise or inactive plan)."
 
         el_remaining_credits = elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
         st.markdown(f"Your Elevenlabs credits remaining: *{el_remaining_credits}* ({elevenlabs_user.subscription.character_count} / {elevenlabs_user.subscription.character_limit}). Renewal date: {renewal_date}")
