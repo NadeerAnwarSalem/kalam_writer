@@ -365,8 +365,16 @@ if not article_id:
                         if edited_rows:
                             process_status_changes(edited_rows, df_articles, admin_editor_key)
 
+        reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
+
+        if reset_timestamp:
+            # Convert Unix timestamp to readable UTC date
+            renewal_date = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
+        else:
+            renewal_date = "No renewal date available (e.g., custom enterprise or inactive plan).")
+
         el_remaining_credits = elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
-        st.markdown(f"Your Elevenlabs credits remaining: *{el_remaining_credits}* ({elevenlabs_user.subscription.character_count}/{elevenlabs_user.subscription.character_limit})")
+        st.markdown(f"Your Elevenlabs credits remaining: *{el_remaining_credits}* ({elevenlabs_user.subscription.character_count} / {elevenlabs_user.subscription.character_limit}). Renewal date: {renewal_date}")
 
         # ---- user dashboard ----
         manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])
