@@ -6,12 +6,37 @@ from supabase import create_client, Client
 from tag_options import TAG_OPTIONS
 from streamlit_cookies_manager import EncryptedCookieManager
 from articles_translate_supabase import translate_article, other_language
+from elevenlabs import ElevenLabs
 
 url: str = st.secrets.get("SUPABASE_URL")
 key: str = st.secrets.get("SUPABASE_KEY")
 service_key: str = st.secrets.get("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(url, key)
 supabase_admin: Client = create_client(url, service_key)
+
+EL_API_KEY = st.secrets.get("ELEVENLABS_KEY")
+MODEL_ID = "eleven_multilingual_v2"
+elevenlabs_client = ElevenLabs(api_key=EL_API_KEY)
+elevenlabs_user = elevenlabs_client.user.get()
+
+ar_voices = [
+    "XdoLPWNt7ytn6BtU4FBf", #abdullah
+    "fkqevZRU7Xj52dY1CTkq", #hijazi
+    "FOyke8LaC5kHLkRFE8oG", #fahad
+    "vszNunPGBVqJg1Qd4H7Z",
+    "xvhpbk8otnNHtT3fjCpr"
+
+]
+
+en_voices = [
+    "TTmUgRoiAUdn043OgRax", #eddie
+    "qSeXEcewz7tA0Q0qk9fH", #viktoria
+    "oaGwHLz3csUaSnc2NBD4", #benedict
+    "GrVxA7Ub86nJH91Viyiv"
+]
+
+OUTPUT_ROOT = Path("C:/Users/nadee/OneDrive/Desktop/descriptions")
+
 
 image_bytes = None  # Initialize image_bytes to None
 img_path = Path(__file__).parent / "bg_img.jpg"
@@ -22,6 +47,18 @@ cookies = EncryptedCookieManager(
 )
 if not cookies.ready():
     st.stop()  # wait for cookies to load before rendering anything else
+
+def generate_audio(text, voice, out_path):
+        audio_stream = elevenlabs_client.text_to_speech.convert(
+                 voice_id=voice,
+                 text=text,
+                 model_id=MODEL_ID,
+                 output_format="mp3_44100_128",
+             )
+     
+        with open(out_path, "wb") as f:
+            for chunk in audio_stream:
+                f.write(chunk)
 
 if not st.session_state.get("logged_in") and cookies.get("refresh_token"):
     try:
@@ -319,6 +356,9 @@ if not article_id:
                         edited_rows = st.session_state.get(admin_editor_key, {}).get("edited_rows", {})
                         if edited_rows:
                             process_status_changes(edited_rows, df_articles, admin_editor_key)
+
+        el_remaining_credits = elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
+        st.markdown(f"Your Elevenlabs credits remaining: *{el_remaining_credits}* ({elevenlabs_user.subscription.character_count}/{elevenlabs_user.subscription.character_limit})")
 
         # ---- user dashboard ----
         manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])

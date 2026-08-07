@@ -110,7 +110,7 @@ def translate_text(text: str, source_language: str) -> str:
     """Translate a single piece of text out of `source_language` into the other language."""
     client = cl(
     host="https://ollama.com",
-    headers={"Authorization": f"Bearer {secrets.get("OLLAMA_API")}"},
+    headers={"Authorization": f"Bearer {secrets.get('OLLAMA_API')}"},
     )
     resp = client.chat(
         model=OLLAMA_MODEL,
