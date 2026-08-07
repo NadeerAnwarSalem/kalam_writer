@@ -322,19 +322,24 @@ if not article_id:
                         articles_data = supabase.table("articles").select("*").execute().data
 
                         articles = [
-                            (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "View")
+                            (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "Actions", "Speech Credits")
                             for a in articles_data
                         ]
-                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Actions"])
+                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Actions", "Speech Credits"])
                         df_articles["Actions"] = df_articles["ID"].apply(
                             lambda aid: f"/Article_Reader?article_id={aid}"
                         )
+
+                        df_articles["Speech Credits"] = [
+                            len((a.get("summary") or "") + (a.get("content") or ""))
+                            for a in articles_data
+                        ]
 
                         admin_editor_key = "admin_article_table_editor"
                         st.data_editor(
                             df_articles,
                             use_container_width=True,
-                            column_order=["Article Author", "Title", "Status", "Actions"],
+                            column_order=["Article Author", "Title", "Status", "Actions", "Speech Credits"],
                             column_config={
                                 "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
                                 "Title": st.column_config.TextColumn("Title", disabled=True),
@@ -347,8 +352,11 @@ if not article_id:
                                     "Read Article",
                                     display_text="Read Article",
                                 ),
+                                "Speech Credits": st.column_config.TextColumn(
+                                    "Speech Credits"
+                                )
                             },
-                            disabled=["Article Author", "Title"],
+                            disabled=["Article Author", "Title", "Speech Credits"],
                             hide_index=True,
                             key=admin_editor_key,
                         )
