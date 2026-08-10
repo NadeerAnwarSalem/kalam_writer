@@ -516,16 +516,25 @@ if not article_id:
                                 key="pending_audio_select",
                             )
 
-                            if st.button("🎙 Generate Audio Now", key="generate_audio_btn"):
-                                with st.spinner("Generating audio for article..."):
-                                    audio_ok = generate_and_upload_article_audio(audio_choice_id)
+                            col_btn, col_txt = st.columns(2)
+                            with col_btn:
+                                if st.button("Generate Audio Now", key="generate_audio_btn"):
+                                    with st.spinner("Generating audio for article..."):
+                                        audio_ok = generate_and_upload_article_audio(audio_choice_id)
 
-                                if audio_ok:
-                                    supabase.table("articles").update({"audio_generated": True}).eq("id", audio_choice_id).execute()
-                                    st.success("Audio generated and uploaded successfully!")
-                                    st.rerun()
-                                else:
-                                    st.error("Audio generation could not be completed.")
+                                    if audio_ok:
+                                        supabase.table("articles").update({"audio_generated": True}).eq("id", audio_choice_id).execute()
+                                        st.success("Audio generated and uploaded successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Audio generation could not be completed.")
+                                        
+                                    selected_length = pending_audio_df.loc[
+                                        pending_audio_df["ID"] == audio_choice_id, "Length"
+                                    ].iloc[0]
+
+                                    with col_txt:
+                                        st.write(f"This article will use approximately {selected_length} credits when narrated.")
 
             reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
             if reset_timestamp:
