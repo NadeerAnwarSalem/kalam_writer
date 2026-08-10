@@ -231,24 +231,18 @@ def generate_and_upload_article_audio(article_id: str) -> bool:
 
 
 def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_key: str):
-    """Apply status edits from a data_editor, translating and generating audio on approval.
-
-    Clears the editor's edited_rows afterward and reruns, so the same edits
-    can't be re-applied (and re-translated/re-narrated) on a later,
-    unrelated rerun.
-    """
     any_processed = False
     for index, change in edited_rows.items():
         if "Status" not in change:
             continue
 
-        row_article_id = df_articles.iloc[index]["ID"]
+        row = df_articles.iloc[index]
+        row_article_id = row["ID"]
         new_status = change["Status"]
 
-        # "Approve As" may or may not have been touched in this same edit;
-        # fall back to whatever value the table currently shows for this row.
-        approve_choice = change.get("Approve As", df_articles.iloc[index]["Approve As"])
-        approve_with_audio = approve_choice == "With Audio"
+        author_wants_audio = row["With Audio"]
+        approve_choice = change.get("Approve As", row["Approve As"])
+        approve_with_audio_now = approve_choice == "With Audio"
 
         with st.spinner("Updating status..."):
             status_ok = update_article_status(row_article_id, new_status)
@@ -260,28 +254,30 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
             with st.spinner("Translating and updating article..."):
                 translation_ok = translate_and_update_article(row_article_id)
 
-            if translation_ok and approve_with_audio:
+            if not translation_ok:
+                st.warning("Status updated, but translation could not be completed.")
+            elif not author_wants_audio:
+                # Author never requested audio — nothing to generate, ever.
+                st.success("Status updated and article translated. No audio requested by author.")
+            elif approve_with_audio_now:
                 with st.spinner("Generating audio for article..."):
                     audio_ok = generate_and_upload_article_audio(row_article_id)
 
                 if audio_ok:
+                    supabase.table("articles").update({"audio_generated": True}).eq("id", row_article_id).execute()
                     st.success("Status updated, article translated, and audio generated successfully!")
                 else:
                     st.warning("Status updated and article translated, but audio generation could not be completed.")
-            elif translation_ok and not approve_with_audio:
-                st.success("Status updated and article translated. Audio was skipped and can be added later.")
             else:
-                st.warning("Status updated, but translation could not be completed.")
+                st.success("Status updated and article translated. Audio deferred — add it later below.")
         else:
             st.success("Status updated successfully!")
 
         any_processed = True
 
     if any_processed:
-        # Prevent the same edits from being re-applied on the next rerun.
         st.session_state[editor_key]["edited_rows"] = {}
         st.rerun()
-
 
 @st.dialog("Edit Article Dialog", dismissible=True)
 def edit_article_dialog(article_data: dict):
@@ -432,7 +428,8 @@ if not article_id:
                                 a["article_author"],
                                 a[f"{a['language'].lower()}_title"],
                                 a["status"],
-                                a.get("with_audio", False),
+                                bool(a.get("with_audio") or False),      # author's preference, read-only
+                                bool(a.get("audio_generated") or False), # actual generation state, hidden field
                                 "With Audio",  # default choice when approving
                                 "Actions",
                                 "Length",
@@ -441,7 +438,7 @@ if not article_id:
                         ]
                         df_articles = pd.DataFrame(
                             articles,
-                            columns=["ID", "Article Author", "Title", "Status", "With Audio", "Approve As", "Actions", "Length"],
+                            columns=["ID", "Article Author", "Title", "Status", "With Audio", "Audio Generated", "Approve As", "Actions", "Length"],
                         )
                         df_articles["Actions"] = df_articles["ID"].apply(
                             lambda aid: f"/Article_Reader?article_id={aid}"
@@ -471,12 +468,12 @@ if not article_id:
                                 ),
                                 "With Audio": st.column_config.CheckboxColumn(
                                     "With Audio",
-                                    help="Whether narrated audio currently exists for this article",
+                                    help="Author's preference — set at article creation, cannot be changed here",
                                     disabled=True,
                                 ),
                                 "Approve As": st.column_config.SelectboxColumn(
                                     "Approve As",
-                                    help="When approving: generate audio now, or approve and add audio later",
+                                    help="Only applies if the author requested audio: generate now, or add it later",
                                     options=["With Audio", "No Audio (add later)"],
                                 ),
                                 "Actions": st.column_config.LinkColumn(
@@ -498,10 +495,11 @@ if not article_id:
                         if edited_rows:
                             process_status_changes(edited_rows, df_articles, admin_editor_key)
 
-                        st.write(df_articles[["Status", "With Audio"]])  # temporary debug line
-                        # --- Add audio later, for approved articles without it ---
+                        # --- Add audio later: author wanted audio, approved, but not generated yet ---
                         pending_audio_df = df_articles[
-                            (df_articles["Status"] == "approved") & (~df_articles["With Audio"])
+                            (df_articles["Status"] == "approved")
+                            & (df_articles["With Audio"])           # author actually requested it
+                            & (~df_articles["Audio Generated"])     # but it hasn't been made yet
                         ]
 
                         if not pending_audio_df.empty:
@@ -522,6 +520,7 @@ if not article_id:
                                     audio_ok = generate_and_upload_article_audio(audio_choice_id)
 
                                 if audio_ok:
+                                    supabase.table("articles").update({"audio_generated": True}).eq("id", audio_choice_id).execute()
                                     st.success("Audio generated and uploaded successfully!")
                                     st.rerun()
                                 else:
