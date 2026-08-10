@@ -483,12 +483,13 @@ if not article_id:
                                     "Read Article",
                                     display_text="Read Article",
                                 ),
-                                "Length": st.column_config.TextColumn(
+                                "Length": st.column_config.NumberColumn(
                                     "Length",
+                                    disabled=True,
                                     help="Approx. this is half of credits this article will use when narrated",
                                 ),
                             },
-                            disabled=["Article Author", "Title", "With Audio"],
+                            disabled=["Article Author", "Title", "With Audio", "Length"],
                             hide_index=True,
                             key=admin_editor_key,
                         )
