@@ -498,6 +498,7 @@ if not article_id:
                         if edited_rows:
                             process_status_changes(edited_rows, df_articles, admin_editor_key)
 
+                        st.write(df_articles[["Status", "With Audio"]])  # temporary debug line
                         # --- Add audio later, for approved articles without it ---
                         pending_audio_df = df_articles[
                             (df_articles["Status"] == "approved") & (~df_articles["With Audio"])
