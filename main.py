@@ -427,10 +427,22 @@ if not article_id:
                         articles_data = supabase.table("articles").select("*").execute().data
 
                         articles = [
-                            (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], a["with_audio"], "Actions", "Length")
+                            (
+                                a["id"],
+                                a["article_author"],
+                                a[f"{a['language'].lower()}_title"],
+                                a["status"],
+                                a.get("with_audio", False),
+                                "With Audio",  # default choice when approving
+                                "Actions",
+                                "Length",
+                            )
                             for a in articles_data
                         ]
-                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "With Audio", "Actions", "Length"])
+                        df_articles = pd.DataFrame(
+                            articles,
+                            columns=["ID", "Article Author", "Title", "Status", "With Audio", "Approve As", "Actions", "Length"],
+                        )
                         df_articles["Actions"] = df_articles["ID"].apply(
                             lambda aid: f"/Article_Reader?article_id={aid}"
                         )
@@ -448,7 +460,7 @@ if not article_id:
                         st.data_editor(
                             df_articles,
                             use_container_width=True,
-                            column_order=["Article Author", "Title", "Status", "With Audio", "Actions", "Length"],
+                            column_order=["Article Author", "Title", "Status", "With Audio", "Approve As", "Actions", "Length"],
                             column_config={
                                 "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
                                 "Title": st.column_config.TextColumn("Title", disabled=True),
@@ -456,6 +468,16 @@ if not article_id:
                                     "Status",
                                     help="Toggle to change article status",
                                     options=["pending", "approved", "rejected"],
+                                ),
+                                "With Audio": st.column_config.CheckboxColumn(
+                                    "With Audio",
+                                    help="Whether narrated audio currently exists for this article",
+                                    disabled=True,
+                                ),
+                                "Approve As": st.column_config.SelectboxColumn(
+                                    "Approve As",
+                                    help="When approving: generate audio now, or approve and add audio later",
+                                    options=["With Audio", "No Audio (add later)"],
                                 ),
                                 "Actions": st.column_config.LinkColumn(
                                     "Read Article",
@@ -466,7 +488,7 @@ if not article_id:
                                     help="Approx. this is half of credits this article will use when narrated",
                                 ),
                             },
-                            disabled=["Article Author", "Title", "Speech Credits"],
+                            disabled=["Article Author", "Title", "With Audio"],
                             hide_index=True,
                             key=admin_editor_key,
                         )
@@ -474,6 +496,34 @@ if not article_id:
                         edited_rows = st.session_state.get(admin_editor_key, {}).get("edited_rows", {})
                         if edited_rows:
                             process_status_changes(edited_rows, df_articles, admin_editor_key)
+
+                        # --- Add audio later, for approved articles without it ---
+                        pending_audio_df = df_articles[
+                            (df_articles["Status"] == "approved") & (~df_articles["With Audio"])
+                        ]
+
+                        if not pending_audio_df.empty:
+                            st.divider()
+                            st.write("**Add audio to approved articles**")
+
+                            audio_choice_id = st.selectbox(
+                                "Select an article to generate audio for",
+                                options=pending_audio_df["ID"],
+                                format_func=lambda aid: pending_audio_df.loc[
+                                    pending_audio_df["ID"] == aid, "Title"
+                                ].values[0],
+                                key="pending_audio_select",
+                            )
+
+                            if st.button("🎙 Generate Audio Now", key="generate_audio_btn"):
+                                with st.spinner("Generating audio for article..."):
+                                    audio_ok = generate_and_upload_article_audio(audio_choice_id)
+
+                                if audio_ok:
+                                    st.success("Audio generated and uploaded successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error("Audio generation could not be completed.")
 
         reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
         if reset_timestamp:
