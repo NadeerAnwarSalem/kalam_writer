@@ -516,7 +516,7 @@ if not article_id:
                                 key="pending_audio_select",
                             )
 
-                            col_btn, col_txt = st.columns(2)
+                            col_btn, col_txt = st.columns([1,2])
                             with col_btn:
                                 if st.button("Generate Audio Now", key="generate_audio_btn"):
                                     with st.spinner("Generating audio for article..."):
