@@ -245,6 +245,11 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
         row_article_id = df_articles.iloc[index]["ID"]
         new_status = change["Status"]
 
+        # "Approve As" may or may not have been touched in this same edit;
+        # fall back to whatever value the table currently shows for this row.
+        approve_choice = change.get("Approve As", df_articles.iloc[index]["Approve As"])
+        approve_with_audio = approve_choice == "With Audio"
+
         with st.spinner("Updating status..."):
             status_ok = update_article_status(row_article_id, new_status)
 
@@ -255,7 +260,7 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
             with st.spinner("Translating and updating article..."):
                 translation_ok = translate_and_update_article(row_article_id)
 
-            if translation_ok:
+            if translation_ok and approve_with_audio:
                 with st.spinner("Generating audio for article..."):
                     audio_ok = generate_and_upload_article_audio(row_article_id)
 
@@ -263,6 +268,8 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
                     st.success("Status updated, article translated, and audio generated successfully!")
                 else:
                     st.warning("Status updated and article translated, but audio generation could not be completed.")
+            elif translation_ok and not approve_with_audio:
+                st.success("Status updated and article translated. Audio was skipped and can be added later.")
             else:
                 st.warning("Status updated, but translation could not be completed.")
         else:
@@ -300,6 +307,11 @@ def edit_article_dialog(article_data: dict):
 
     new_article_tags = st.multiselect("Hashtags", options=TAG_OPTIONS, max_selections=5, default=article_data["tags"])
     new_author = st.text_input("Author", value=article_data['article_author'], disabled=True)
+    new_with_audio = st.checkbox(
+        "Include AI-generated audio for this article?",
+        help="If selected, AI-generated audio will be added to your article within 30 days."
+        )
+
     # new_image = st.file_uploader("Upload New Image", type=["png", "jpg", "jpeg"])
 
     if st.button("Save Changes"):
@@ -308,7 +320,8 @@ def edit_article_dialog(article_data: dict):
             f"{lang.lower()}_summary": new_summary,
             f"{lang.lower()}_content": new_content,
             "article_author": new_author,
-            "tags": new_article_tags
+            "tags": new_article_tags, 
+            "with_audio": new_with_audio,
         }
         try:
             supabase.table("articles").update(updated_data).eq("id", article_data['id']).execute()
@@ -414,14 +427,14 @@ if not article_id:
                         articles_data = supabase.table("articles").select("*").execute().data
 
                         articles = [
-                            (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "Actions", "Speech Credits")
+                            (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], a["with_audio"], "Actions", "Length")
                             for a in articles_data
                         ]
-                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Actions", "Speech Credits"])
+                        df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "With Audio", "Actions", "Length"])
                         df_articles["Actions"] = df_articles["ID"].apply(
                             lambda aid: f"/Article_Reader?article_id={aid}"
                         )
-                        df_articles["Speech Credits"] = [
+                        df_articles["Length"] = [
                             len(
                                 (a.get("arabic_summary") or "")
                                 + (a.get("arabic_content") or "")
@@ -435,7 +448,7 @@ if not article_id:
                         st.data_editor(
                             df_articles,
                             use_container_width=True,
-                            column_order=["Article Author", "Title", "Status", "Actions", "Speech Credits"],
+                            column_order=["Article Author", "Title", "Status", "With Audio", "Actions", "Length"],
                             column_config={
                                 "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
                                 "Title": st.column_config.TextColumn("Title", disabled=True),
@@ -448,9 +461,9 @@ if not article_id:
                                     "Read Article",
                                     display_text="Read Article",
                                 ),
-                                "Speech Credits": st.column_config.TextColumn(
-                                    "Speech Credits",
-                                    help="Approx. ElevenLabs characters this article will use when narrated",
+                                "Length": st.column_config.TextColumn(
+                                    "Length",
+                                    help="Approx. this is half of credits this article will use when narrated",
                                 ),
                             },
                             disabled=["Article Author", "Title", "Speech Credits"],
@@ -549,6 +562,11 @@ if not article_id:
                         if article_image:
                             image_bytes = article_image.getvalue()
 
+                        with_audio = st.checkbox(
+                        "Include AI-generated audio for this article?",
+                        help="If selected, AI-generated audio will be added to your article within 30 days."
+                        )
+
                         col1, col2, col3 = st.columns(3, gap="small")
                         with col1:
                             preview_submitted = st.form_submit_button("Update Preview", type="secondary")
@@ -610,7 +628,8 @@ if not article_id:
                                             "language": article_language,
                                             "article_author": article_author,
                                             "published_at": datetime.now(timezone.utc).isoformat(),
-                                            "tags": article_hashtags
+                                            "tags": article_hashtags,
+                                            "with_audio": with_audio
                                             # audio later
                                         }
                                         try:
