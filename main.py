@@ -534,7 +534,7 @@ if not article_id:
                             ].iloc[0]
 
                             with col_txt:
-                                        st.write(f"This article will use approximately {selected_length} credits when narrated.")
+                                st.write(f"This article will use approximately **{selected_length}** credits when narrated.")
 
             reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
             if reset_timestamp:
