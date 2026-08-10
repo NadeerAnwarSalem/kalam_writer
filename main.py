@@ -528,12 +528,12 @@ if not article_id:
                                         st.rerun()
                                     else:
                                         st.error("Audio generation could not be completed.")
-                                        
-                                    selected_length = pending_audio_df.loc[
-                                        pending_audio_df["ID"] == audio_choice_id, "Length"
-                                    ].iloc[0]
 
-                                    with col_txt:
+                            selected_length = pending_audio_df.loc[
+                                pending_audio_df["ID"] == audio_choice_id, "Length"
+                            ].iloc[0]
+
+                            with col_txt:
                                         st.write(f"This article will use approximately {selected_length} credits when narrated.")
 
             reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
