@@ -305,7 +305,8 @@ def edit_article_dialog(article_data: dict):
     new_author = st.text_input("Author", value=article_data['article_author'], disabled=True)
     new_with_audio = st.checkbox(
         "Include AI-generated audio for this article?",
-        help="If selected, AI-generated audio will be added to your article within 30 days."
+        help="If selected, AI-generated audio will be added to your article within 30 days.",
+        value=article_data.get("with_audio", False),
         )
 
     # new_image = st.file_uploader("Upload New Image", type=["png", "jpg", "jpeg"])
@@ -526,20 +527,20 @@ if not article_id:
                                 else:
                                     st.error("Audio generation could not be completed.")
 
-        reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
-        if reset_timestamp:
-            renewal_date = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
-        else:
-            renewal_date = "No renewal date available (e.g., custom enterprise or inactive plan)."
+            reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
+            if reset_timestamp:
+                renewal_date = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
+            else:
+                renewal_date = "No renewal date available (e.g., custom enterprise or inactive plan)."
 
-        el_remaining_credits = (
-            elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
-        )
-        st.markdown(
-            f"Your ElevenLabs credits remaining: *{el_remaining_credits}* "
-            f"({elevenlabs_user.subscription.character_count} / {elevenlabs_user.subscription.character_limit}). "
-            f"Renewal date: {renewal_date}"
-        )
+            el_remaining_credits = (
+                elevenlabs_user.subscription.character_limit - elevenlabs_user.subscription.character_count
+            )
+            st.markdown(
+                f"Your ElevenLabs credits remaining: *{el_remaining_credits}* "
+                f"({elevenlabs_user.subscription.character_count} / {elevenlabs_user.subscription.character_limit}). "
+                f"Renewal date: {renewal_date}"
+            )
 
         # ---- user dashboard ----
         manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])
