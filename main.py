@@ -1097,7 +1097,7 @@ if not article_id:
                 if preview_parts:
                     st.markdown(
                         "<div dir='rtl' style='text-align:right; font-size:20px; line-height:2; padding:12px; "
-                        "background:#f8f9fa; border:1px solid #e5e7eb; border-radius:10px;'>"
+                        "background:#f8f9fa; color:#374151; border:1px solid #e5e7eb; border-radius:10px;'>"
                         + " ".join(preview_parts)
                         + "</div>",
                         unsafe_allow_html=True,
