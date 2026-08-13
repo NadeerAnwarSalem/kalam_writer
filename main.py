@@ -1,5 +1,6 @@
 import pandas as pd
 import random
+import string
 import tempfile
 
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from streamlit_cookies_manager import EncryptedCookieManager
 from articles_translate_supabase import translate_article, other_language
 from elevenlabs import ElevenLabs
 from r2_client import upload_audio
+from builder import QuranpediaClient, QuranArticleBuilder
 
 
 url: str = st.secrets.get("SUPABASE_URL")
@@ -40,6 +42,10 @@ en_voices = [
 
 OUTPUT_ROOT = Path(st.secrets.get("AUDIO_OUTPUT_DIR", tempfile.gettempdir())) / "kalam_audio"
 OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+
+quranpedia_client = QuranpediaClient()
+
+TADABBUR_MAX_VERSES = 10
 
 image_bytes = None  # Initialize image_bytes to None
 img_path = Path(__file__).parent / "bg_img.jpg"
@@ -279,6 +285,185 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
         st.session_state[editor_key]["edited_rows"] = {}
         st.rerun()
 
+
+@st.cache_data(show_spinner=False)
+def get_surah_ayah_count(surah: int) -> int:
+    """Total ayah count for a surah, via Quranpedia. Falls back to 1 on API failure
+    so number_input widgets that depend on this never end up with max < min."""
+    try:
+        ayahs = quranpedia_client.get_surah_ayahs(surah)
+    except Exception:
+        return 1
+    return len(ayahs) if ayahs else 1
+
+
+@st.cache_data(show_spinner=False)
+def fetch_ayah_text(surah: int, ayah: int):
+    """Arabic text for a single ayah, via Quranpedia. Returns None on failure."""
+    try:
+        data = quranpedia_client.get_ayah(surah, ayah)
+    except Exception:
+        return None
+    return data.get("text") if data else None
+
+
+def generate_tadabbur_slug(title: str, surah: int, start_ayah: int, end_ayah: int) -> str:
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+    if title and title.strip():
+        base = title.strip().lower().replace(" ", "-")
+    else:
+        base = f"tadabbur-{surah}-{start_ayah}-{end_ayah}"
+    return f"{base}-{suffix}"
+
+
+def update_tadabbur_status(tadabbur_id: str, new_status: str) -> bool:
+    """Update a specific tadabbur's status in Supabase. Returns True on success."""
+    try:
+        supabase.table("tadabbur").update({"status": new_status}).eq(
+            "id", tadabbur_id
+        ).execute()
+        return True
+    except Exception as exc:
+        st.error(f"Failed to update status: {exc}")
+        return False
+
+
+def translate_and_update_tadabbur(tadabbur_id: str) -> bool:
+    """Translate an approved tadabbur into whichever language it's missing.
+
+    Mirrors translate_and_update_article: source language comes from the
+    `language` column. Only title/content are translated -- tadabbur has no
+    summary field. Skips (and returns True) if the target-language content
+    is already populated, so re-approving never clobbers a manually
+    corrected translation.
+    """
+    try:
+        response = supabase.table("tadabbur").select("*").eq("id", tadabbur_id).single().execute()
+    except Exception as exc:
+        st.warning(f"Could not load tadabbur for translation: {exc}")
+        return False
+
+    if not response.data:
+        st.warning("Tadabbur not found for translation.")
+        return False
+
+    row = response.data
+    source_language = row.get("language")
+    if source_language not in ("Arabic", "English"):
+        st.warning("Tadabbur has no recognized language set, skipping translation.")
+        return False
+
+    target_language = other_language(source_language)
+
+    if row.get(f"{target_language.lower()}_content"):
+        return True
+
+    source_content = row.get(f"{source_language.lower()}_content")
+    if not source_content:
+        st.warning("Tadabbur has no content to translate.")
+        return False
+
+    payload = {"content": source_content}
+    source_title = row.get(f"{source_language.lower()}_title")
+    if source_title:
+        payload["title"] = source_title
+
+    try:
+        translated = translate_article(payload, source_language)
+    except Exception as exc:
+        st.warning(f"Translation failed: {exc}")
+        return False
+
+    if not translated:
+        return True
+
+    update_data = {f"{target_language.lower()}_{key}": value for key, value in translated.items()}
+
+    try:
+        supabase.table("tadabbur").update(update_data).eq("id", tadabbur_id).execute()
+    except Exception as exc:
+        st.warning(f"Translation succeeded but saving it failed: {exc}")
+        return False
+
+    return True
+
+
+def backfill_missing_ayat_for_tadabbur(surah: int, start_ayah: int, end_ayah: int) -> None:
+    """Ensure every ayah in [start_ayah, end_ayah] of `surah` exists in the ayat
+    table, fetching+inserting any that are missing via the same
+    QuranArticleBuilder pipeline the Quran-curation scripts already use (Arabic
+    text + tafsir + asbab from Quranpedia). Uses supabase_admin since writing to
+    ayat requires the service role key (ayat is read-only for the anon key).
+
+    A failure fetching/inserting one ayah is logged and skipped -- it never
+    blocks the rest of the range or the tadabbur approval itself. Ayahs already
+    present in ayat are left untouched, never re-fetched or overwritten.
+    """
+    builder = QuranArticleBuilder(quranpedia_client)
+    for ayah in range(start_ayah, end_ayah + 1):
+        try:
+            existing = (
+                supabase_admin.table("ayat")
+                .select("id")
+                .eq("surah", surah)
+                .eq("ayah_number", ayah)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            st.warning(f"Could not check ayat table for {surah}:{ayah}: {exc}")
+            continue
+
+        if existing.data:
+            continue
+
+        try:
+            data = builder.build(surah, ayah)
+            supabase_admin.table("ayat").upsert(data, on_conflict="surah,ayah_number").execute()
+        except Exception as exc:
+            st.warning(f"Could not fetch/insert ayah {surah}:{ayah} into ayat: {exc}")
+            continue
+
+
+def process_tadabbur_status_changes(edited_rows: dict, df_tadabbur: pd.DataFrame, editor_key: str):
+    any_processed = False
+    for index, change in edited_rows.items():
+        if "Status" not in change:
+            continue
+
+        row = df_tadabbur.iloc[index]
+        row_tadabbur_id = row["ID"]
+        new_status = change["Status"]
+
+        with st.spinner("Updating status..."):
+            status_ok = update_tadabbur_status(row_tadabbur_id, new_status)
+
+        if not status_ok:
+            continue
+
+        if new_status == "approved":
+            with st.spinner("Translating tadabbur..."):
+                translation_ok = translate_and_update_tadabbur(row_tadabbur_id)
+
+            with st.spinner("Checking tafsir coverage for referenced verses..."):
+                backfill_missing_ayat_for_tadabbur(
+                    int(row["Surah"]), int(row["Start Ayah"]), int(row["End Ayah"])
+                )
+
+            if not translation_ok:
+                st.warning("Status updated, but translation could not be completed.")
+            else:
+                st.success("Status updated, tadabbur translated, and verse coverage checked.")
+        else:
+            st.success("Status updated successfully!")
+
+        any_processed = True
+
+    if any_processed:
+        st.session_state[editor_key]["edited_rows"] = {}
+        st.rerun()
+
+
 @st.dialog("Edit Article Dialog", dismissible=True)
 def edit_article_dialog(article_data: dict):
     lang = article_data["language"]
@@ -408,7 +593,7 @@ if not article_id:
 
             with manage_data_tab:
                 with st.container(border=True, height=500):
-                    users_tab, articles_tab = st.tabs(["Users", "Articles"])
+                    users_tab, articles_tab, tadabbur_tab = st.tabs(["Users", "Articles", "Tadabbur"])
                     with users_tab:
                         st.write("List of Users")
                         users = supabase_admin.auth.admin.list_users()
@@ -536,6 +721,63 @@ if not article_id:
                             with col_txt:
                                 st.write(f"This article will use approximately **{selected_length}** credits when narrated.")
 
+                    with tadabbur_tab:
+                        st.write("List of Tadabbur")
+                        tadabbur_data = supabase.table("tadabbur").select("*").execute().data
+
+                        def _tadabbur_title_or_excerpt(t):
+                            title = t.get("arabic_title") or t.get("english_title")
+                            if title:
+                                return title
+                            content = (t.get("arabic_content") or t.get("english_content") or "").strip().replace("\n", " ")
+                            return content[:60] + ("..." if len(content) > 60 else "")
+
+                        tadabbur_rows = [
+                            (
+                                t["id"],
+                                t.get("display_author") or "Unknown Author",
+                                (
+                                    f"{t['surah']}:{t['start_ayah']}-{t['end_ayah']}"
+                                    if t["start_ayah"] != t["end_ayah"]
+                                    else f"{t['surah']}:{t['start_ayah']}"
+                                ),
+                                _tadabbur_title_or_excerpt(t),
+                                t["status"],
+                                t["surah"],
+                                t["start_ayah"],
+                                t["end_ayah"],
+                            )
+                            for t in tadabbur_data
+                        ]
+                        df_tadabbur = pd.DataFrame(
+                            tadabbur_rows,
+                            columns=["ID", "Display Author", "Verse Reference", "Title", "Status", "Surah", "Start Ayah", "End Ayah"],
+                        )
+
+                        admin_tadabbur_editor_key = "admin_tadabbur_table_editor"
+                        st.data_editor(
+                            df_tadabbur,
+                            use_container_width=True,
+                            column_order=["Display Author", "Verse Reference", "Title", "Status"],
+                            column_config={
+                                "Display Author": st.column_config.TextColumn("Display Author", disabled=True),
+                                "Verse Reference": st.column_config.TextColumn("Verse Reference", disabled=True),
+                                "Title": st.column_config.TextColumn("Title", disabled=True),
+                                "Status": st.column_config.SelectboxColumn(
+                                    "Status",
+                                    help="Toggle to change tadabbur status",
+                                    options=["pending", "approved", "rejected"],
+                                ),
+                            },
+                            disabled=["Display Author", "Verse Reference", "Title"],
+                            hide_index=True,
+                            key=admin_tadabbur_editor_key,
+                        )
+
+                        edited_tadabbur_rows = st.session_state.get(admin_tadabbur_editor_key, {}).get("edited_rows", {})
+                        if edited_tadabbur_rows:
+                            process_tadabbur_status_changes(edited_tadabbur_rows, df_tadabbur, admin_tadabbur_editor_key)
+
             reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
             if reset_timestamp:
                 renewal_date = datetime.fromtimestamp(reset_timestamp, tz=timezone.utc)
@@ -552,7 +794,9 @@ if not article_id:
             )
 
         # ---- user dashboard ----
-        manage_articles_tab, create_article_tab = st.tabs(["Manage Articles", "Create Article"])
+        manage_articles_tab, create_article_tab, create_tadabbur_tab = st.tabs(
+            ["Manage Articles", "Create Article", "Create Tadabbur"]
+        )
         with manage_articles_tab:
             st.write("Manage Articles")
             articles_data = (
@@ -807,6 +1051,146 @@ if not article_id:
                         )
                     else:
                         st.write("Start writing to see a preview of your article content here.")
+
+        with create_tadabbur_tab:
+            with st.expander("Create New Tadabbur", expanded=True):
+                st.caption("Share what a verse means to you — a personal reflection, not a scholarly interpretation.")
+
+                vcol1, vcol2, vcol3 = st.columns(3)
+                with vcol1:
+                    tadabbur_surah = st.number_input("Surah", min_value=1, max_value=114, value=1, step=1, key="tadabbur_surah")
+
+                surah_ayah_count = get_surah_ayah_count(int(tadabbur_surah))
+                # Clamp stale session-state values before each widget renders -- switching
+                # surah/start can otherwise leave a previous value outside the new bounds,
+                # which Streamlit raises on rather than silently clamping.
+                if st.session_state.get("tadabbur_start_ayah", 1) > surah_ayah_count:
+                    st.session_state["tadabbur_start_ayah"] = surah_ayah_count
+
+                with vcol2:
+                    tadabbur_start_ayah = st.number_input(
+                        "Start Ayah", min_value=1, max_value=surah_ayah_count, value=1, step=1, key="tadabbur_start_ayah"
+                    )
+
+                max_end_ayah = min(surah_ayah_count, int(tadabbur_start_ayah) + TADABBUR_MAX_VERSES - 1)
+                current_end_ayah = st.session_state.get("tadabbur_end_ayah", int(tadabbur_start_ayah))
+                if current_end_ayah < int(tadabbur_start_ayah) or current_end_ayah > max_end_ayah:
+                    st.session_state["tadabbur_end_ayah"] = max(int(tadabbur_start_ayah), min(current_end_ayah, max_end_ayah))
+
+                with vcol3:
+                    tadabbur_end_ayah = st.number_input(
+                        "End Ayah",
+                        min_value=int(tadabbur_start_ayah),
+                        max_value=max(max_end_ayah, int(tadabbur_start_ayah)),
+                        value=int(tadabbur_start_ayah),
+                        step=1,
+                        key="tadabbur_end_ayah",
+                    )
+
+                with st.spinner("Loading verse preview..."):
+                    preview_parts = []
+                    for a in range(int(tadabbur_start_ayah), int(tadabbur_end_ayah) + 1):
+                        text = fetch_ayah_text(int(tadabbur_surah), a)
+                        if text:
+                            preview_parts.append(f"({a}) {text}")
+
+                if preview_parts:
+                    st.markdown(
+                        "<div dir='rtl' style='text-align:right; font-size:20px; line-height:2; padding:12px; "
+                        "background:#f8f9fa; border:1px solid #e5e7eb; border-radius:10px;'>"
+                        + " ".join(preview_parts)
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info("No preview available for this verse range yet.")
+
+                with st.form("create_tadabbur_form"):
+                    tadabbur_language = st.selectbox("Language", ["English", "Arabic"], index=None, key="tadabbur_language")
+                    tadabbur_title = st.text_input("Title (optional)", max_chars=40, key="tadabbur_title")
+                    tadabbur_write, tadabbur_pdf_tab, tadabbur_word_tab, tadabbur_txt_tab = st.tabs(["Write", "PDF", "Word", "Text"])
+                    with tadabbur_write:
+                        tadabbur_content = st.text_area("Your Reflection", max_chars=10000, key="tadabbur_content")
+                    with tadabbur_pdf_tab:
+                        tadabbur_pdf = st.file_uploader("Upload PDF", type=["pdf"], key="tadabbur_pdf")
+                        if tadabbur_pdf:
+                            tadabbur_content = extract_text(tadabbur_pdf, "pdf")
+                    with tadabbur_word_tab:
+                        tadabbur_word = st.file_uploader("Upload Word Document", type=["docx", "doc"], key="tadabbur_word")
+                        if tadabbur_word:
+                            tadabbur_content = extract_text(tadabbur_word, "docx")
+                    with tadabbur_txt_tab:
+                        tadabbur_txt = st.file_uploader("Upload Text File", type=["txt"], key="tadabbur_txt")
+                        if tadabbur_txt:
+                            tadabbur_content = extract_text(tadabbur_txt, "txt")
+
+                    tadabbur_tags = st.multiselect("Tags", options=TAG_OPTIONS, max_selections=5, key="tadabbur_tags")
+                    tadabbur_image = st.file_uploader("Image (optional)", type=["jpg", "jpeg", "png"], key="tadabbur_image")
+                    tadabbur_display_author = st.text_input(
+                        "Display Author", value=st.session_state.get("username", "Unknown Author"), key="tadabbur_author_input"
+                    )
+                    tadabbur_author_unknown = st.checkbox("Author Unknown", value=True, key="tadabbur_author_unknown")
+                    if tadabbur_author_unknown or tadabbur_display_author.strip() == "":
+                        tadabbur_display_author = "Unknown Author"
+
+                    create_tadabbur_submitted = st.form_submit_button("Create Tadabbur", type="primary")
+
+                    if create_tadabbur_submitted:
+                        verse_count = int(tadabbur_end_ayah) - int(tadabbur_start_ayah) + 1
+                        if not tadabbur_language or not tadabbur_content:
+                            st.error("Please select a language and write your reflection.")
+                        elif len(tadabbur_content) > 10000:
+                            st.error("Reflection exceeds the maximum length of 10,000 characters.")
+                        elif tadabbur_end_ayah < tadabbur_start_ayah:
+                            st.error("End ayah must be greater than or equal to start ayah.")
+                        elif verse_count > TADABBUR_MAX_VERSES:
+                            st.error(f"Please select a range of {TADABBUR_MAX_VERSES} verses or fewer.")
+                        else:
+                            tadabbur_slug = generate_tadabbur_slug(
+                                tadabbur_title, int(tadabbur_surah), int(tadabbur_start_ayah), int(tadabbur_end_ayah)
+                            )
+
+                            tadabbur_image_url = None
+                            if tadabbur_image:
+                                try:
+                                    img_status, img_result = upload_file_to_r2(
+                                        tadabbur_image,
+                                        f"{tadabbur_slug}.jpg",
+                                        f"tadabbur/{st.session_state['user_id']}/{tadabbur_slug}",
+                                    )
+                                    if img_status == 200:
+                                        tadabbur_image_url = img_result
+                                    else:
+                                        st.warning(f"Image upload failed, continuing without an image: {img_result}")
+                                except Exception as exc:
+                                    st.warning(f"Image upload failed, continuing without an image: {exc}")
+
+                            with st.spinner("Submitting tadabbur..."):
+                                tadabbur_insert_data = {
+                                    "slug": tadabbur_slug,
+                                    "surah": int(tadabbur_surah),
+                                    "start_ayah": int(tadabbur_start_ayah),
+                                    "end_ayah": int(tadabbur_end_ayah),
+                                    f"{tadabbur_language.lower()}_title": tadabbur_title.strip() if tadabbur_title.strip() else None,
+                                    f"{tadabbur_language.lower()}_content": tadabbur_content,
+                                    "status": "pending",
+                                    "featured_image_url": tadabbur_image_url,
+                                    "reading_time_minutes": calculate_reading_time(tadabbur_content),
+                                    "author_id": st.session_state["user_id"],
+                                    "display_author": tadabbur_display_author,
+                                    "tags": tadabbur_tags,
+                                    "language": tadabbur_language,
+                                }
+                                try:
+                                    tadabbur_response = supabase.table("tadabbur").insert(tadabbur_insert_data).execute()
+                                except Exception as exc:
+                                    tadabbur_response = None
+                                    st.error(f"Failed to submit tadabbur: {exc}")
+
+                            if tadabbur_response and tadabbur_response.data:
+                                st.success("Tadabbur submitted successfully!")
+                            elif tadabbur_response is not None:
+                                st.error("Failed to submit tadabbur!")
 
         if st.button("Logout"):
             supabase.auth.sign_out()
