@@ -2,6 +2,8 @@ import pandas as pd
 import random
 import string
 import tempfile
+import secrets
+import string
 
 from datetime import datetime, timezone
 from utils import *
@@ -57,6 +59,11 @@ cookies = EncryptedCookieManager(
 if not cookies.ready():
     st.stop()  # wait for cookies to load before rendering anything else
 
+
+def generate_nugget_slug() -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    suffix = ''.join(secrets.choice(alphabet) for _ in range(8))
+    return f"nugget-{suffix}"
 
 def generate_audio(text: str, voice: str, out_path: Path):
     """Generate TTS audio for `text` with ElevenLabs and write it to out_path."""
@@ -935,43 +942,50 @@ if not article_id:
             )
 
         # ---- user dashboard ----
-        manage_articles_tab, create_article_tab, create_tadabbur_tab = st.tabs(
-            ["Manage Articles", "Create Article", "Create Tadabbur"]
+        manage_feed_tab, create_article_tab, create_tadabbur_tab, create_nugget_tab = st.tabs(
+            ["Manage Feed", "Create Article", "Create Tadabbur", "Create Nugget"]
         )
-        with manage_articles_tab:
-            st.write("Manage Articles")
-            articles_data = (
-                supabase_admin.table("articles")
-                .select("*")
-                .eq("author_id", st.session_state.get("user_id"))
-                .execute()
-                .data
-            )
-            articles = [
-                (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "View", "Actions")
-                for a in articles_data
-            ]
-            df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Read Article", "Actions"])
-            df_articles["Options"] = df_articles["ID"].apply(
-                lambda aid: f"/Article_Reader?article_id={aid}"
-            )
-            st.data_editor(
-                df_articles,
-                width="stretch",
-                column_order=["Article Author", "Title", "Status", "Options"],
-                column_config={
-                    "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
-                    "Title": st.column_config.TextColumn("Title", disabled=True),
-                    "Status": st.column_config.TextColumn("Status", disabled=True),
-                    "Options": st.column_config.LinkColumn(
-                        "Configure",
-                        display_text="Options",
-                    ),
-                },
-                disabled=["Article Author", "Title"],
-                hide_index=True,
-                key="article_table_editor",
-            )
+        with manage_feed_tab:
+            manage_articles_tab, manage_tadabbur_tab, manage_nuggets_tab = st.tabs(
+            ["Manage Articles", "Manage Tadabbur", "Manage Nuggets"])
+            with manage_articles_tab:
+                st.write("Manage Articles")
+                articles_data = (
+                    supabase.table("articles")
+                    .select("*")
+                    .eq("author_id", st.session_state.get("user_id"))
+                    .execute()
+                    .data
+                )
+                articles = [
+                    (a["id"], a["article_author"], a[f"{a['language'].lower()}_title"], a["status"], "View", "Actions")
+                    for a in articles_data
+                ]
+                df_articles = pd.DataFrame(articles, columns=["ID", "Article Author", "Title", "Status", "Read Article", "Actions"])
+                df_articles["Options"] = df_articles["ID"].apply(
+                    lambda aid: f"/Article_Reader?article_id={aid}"
+                )
+                st.data_editor(
+                    df_articles,
+                    width="stretch",
+                    column_order=["Article Author", "Title", "Status", "Options"],
+                    column_config={
+                        "Article Author": st.column_config.TextColumn("Article Author", disabled=True),
+                        "Title": st.column_config.TextColumn("Title", disabled=True),
+                        "Status": st.column_config.TextColumn("Status", disabled=True),
+                        "Options": st.column_config.LinkColumn(
+                            "Configure",
+                            display_text="Options",
+                        ),
+                    },
+                    disabled=["Article Author", "Title"],
+                    hide_index=True,
+                    key="article_table_editor",
+                )
+            with manage_tadabbur_tab:
+                pass
+            with manage_nuggets_tab:
+                pass
 
         with create_article_tab:
             with st.expander("Create New Article", expanded=True):
@@ -1332,6 +1346,31 @@ if not article_id:
                                 st.success("Tadabbur submitted successfully!")
                             elif tadabbur_response is not None:
                                 st.error("Failed to submit tadabbur!")
+        with create_nugget_tab:
+            with st.form("create_nugget_form"):
+                nugget_lang = st.selectbox("Nugget Language", ["English", "Arabic"], index=None)
+                nugget_content = st.text_area("Nugget Content", max_chars=300)
+                nugget_hashtags = st.multiselect("nugget Tags", options=TAG_OPTIONS, max_selections=5)
+                nugget_author = st.text_input("Nugget Author", value=st.session_state.get("username", "Unknown Author"))
+                author_unknown = st.checkbox("Author Unknown", value=False)
+                if author_unknown or nugget_author.strip() == "":
+                    nugget_author = "Unknown Author"
+
+                create_nugget_submitted = st.form_submit_button("Create Nugget", type="primary")
+
+                if create_nugget_submitted:
+                    if not nugget_content or nugget_lang:
+                        st.error("Please fill in all required fields (Language, Content).")
+                    with st.spinner("Uploading Nugget"):
+                        insert_data={
+                            "slug": generate_nugget_slug(),
+                            f"{nugget_lang.lower()}_text": nugget_content,
+                            "author_id": st.session_state["user_id"],
+                            "display_author": nugget_author,
+                            "tags": nugget_hashtags,
+                            "language":nugget_lang
+                        }
+
 
         if st.button("Logout"):
             supabase.auth.sign_out()
