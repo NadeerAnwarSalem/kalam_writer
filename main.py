@@ -91,7 +91,7 @@ if not st.session_state.get("logged_in") and cookies.get("refresh_token"):
 def update_article_status(article_id: str, new_status: str) -> bool:
     """Update a specific article's status in Supabase. Returns True on success."""
     try:
-        supabase.table("articles").update({"status": new_status}).eq(
+        supabase_admin.table("articles").update({"status": new_status}).eq(
             "id", article_id
         ).execute()
         return True
@@ -110,7 +110,7 @@ def translate_and_update_article(article_id: str) -> bool:
     """
     try:
         article_response = (
-            supabase.table("articles").select("*").eq("id", article_id).single().execute()
+            supabase_admin.table("articles").select("*").eq("id", article_id).single().execute()
         )
     except Exception as exc:
         st.warning(f"Could not load article for translation: {exc}")
@@ -148,7 +148,7 @@ def translate_and_update_article(article_id: str) -> bool:
     }
 
     try:
-        supabase.table("articles").update(update_data).eq("id", article_id).execute()
+        supabase_admin.table("articles").update(update_data).eq("id", article_id).execute()
     except Exception as exc:
         st.warning(f"Translation succeeded but saving it failed: {exc}")
         return False
@@ -165,7 +165,7 @@ def generate_and_upload_article_audio(article_id: str) -> bool:
     """
     try:
         article_response = (
-            supabase.table("articles").select("*").eq("id", article_id).single().execute()
+            supabase_admin.table("articles").select("*").eq("id", article_id).single().execute()
         )
     except Exception as exc:
         st.warning(f"Could not load article for audio generation: {exc}")
@@ -228,7 +228,7 @@ def generate_and_upload_article_audio(article_id: str) -> bool:
         "en_audio_url": en_audio_url,
     }
     try:
-        supabase.table("articles").update(payload).eq("id", article_id).execute()
+        supabase_admin.table("articles").update(payload).eq("id", article_id).execute()
     except Exception as exc:
         st.warning(f"Audio was generated but saving the URLs failed: {exc}")
         return False
@@ -270,7 +270,7 @@ def process_status_changes(edited_rows: dict, df_articles: pd.DataFrame, editor_
                     audio_ok = generate_and_upload_article_audio(row_article_id)
 
                 if audio_ok:
-                    supabase.table("articles").update({"audio_generated": True}).eq("id", row_article_id).execute()
+                    supabase_admin.table("articles").update({"audio_generated": True}).eq("id", row_article_id).execute()
                     st.success("Status updated, article translated, and audio generated successfully!")
                 else:
                     st.warning("Status updated and article translated, but audio generation could not be completed.")
@@ -319,7 +319,7 @@ def generate_tadabbur_slug(title: str, surah: int, start_ayah: int, end_ayah: in
 def update_tadabbur_status(tadabbur_id: str, new_status: str) -> bool:
     """Update a specific tadabbur's status in Supabase. Returns True on success."""
     try:
-        supabase.table("tadabbur").update({"status": new_status}).eq(
+        supabase_admin.table("tadabbur").update({"status": new_status}).eq(
             "id", tadabbur_id
         ).execute()
         return True
@@ -330,7 +330,7 @@ def update_tadabbur_status(tadabbur_id: str, new_status: str) -> bool:
 def update_nugget_status(nugget_id: str, new_status: str) -> bool:
     """Update a specific nugget's status in Supabase. Returns True on success."""
     try:
-        supabase.table("nuggets").update({"status": new_status}).eq(
+        supabase_admin.table("nuggets").update({"status": new_status}).eq(
             "id", nugget_id
         ).execute()
         return True
@@ -349,7 +349,7 @@ def translate_and_update_tadabbur(tadabbur_id: str) -> bool:
     corrected translation.
     """
     try:
-        response = supabase.table("tadabbur").select("*").eq("id", tadabbur_id).single().execute()
+        response = supabase_admin.table("tadabbur").select("*").eq("id", tadabbur_id).single().execute()
     except Exception as exc:
         st.warning(f"Could not load tadabbur for translation: {exc}")
         return False
@@ -391,7 +391,7 @@ def translate_and_update_tadabbur(tadabbur_id: str) -> bool:
     update_data = {f"{target_language.lower()}_{key}": value for key, value in translated.items()}
 
     try:
-        supabase.table("tadabbur").update(update_data).eq("id", tadabbur_id).execute()
+        supabase_admin.table("tadabbur").update(update_data).eq("id", tadabbur_id).execute()
     except Exception as exc:
         st.warning(f"Translation succeeded but saving it failed: {exc}")
         return False
@@ -408,7 +408,7 @@ def translate_and_update_nugget(nugget_id: str) -> bool:
     corrected translation.
     """
     try:
-        response = supabase.table("nuggets").select("*").eq("id", nugget_id).single().execute()
+        response = supabase_admin.table("nuggets").select("*").eq("id", nugget_id).single().execute()
     except Exception as exc:
         st.warning(f"Could not load nugget for translation: {exc}")
         return False
@@ -447,7 +447,7 @@ def translate_and_update_nugget(nugget_id: str) -> bool:
     update_data = {f"{target_language.lower()}_{key}": value for key, value in translated.items()}
 
     try:
-        supabase.table("nuggets").update(update_data).eq("id", nugget_id).execute()
+        supabase_admin.table("nuggets").update(update_data).eq("id", nugget_id).execute()
     except Exception as exc:
         st.warning(f"Translation succeeded but saving it failed: {exc}")
         return False
@@ -606,7 +606,7 @@ def edit_article_dialog(article_data: dict):
             "with_audio": new_with_audio,
         }
         try:
-            supabase.table("articles").update(updated_data).eq("id", article_data['id']).execute()
+            supabase_admin.table("articles").update(updated_data).eq("id", article_data['id']).execute()
             st.success("Article updated successfully!")
             st.rerun()
         except Exception as exc:
@@ -706,7 +706,7 @@ if not article_id:
 
                     with articles_tab:
                         st.write("List of Articles")
-                        articles_data = supabase.table("articles").select("*").execute().data
+                        articles_data = supabase_admin.table("articles").select("*").execute().data
 
                         articles = [
                             (
@@ -808,7 +808,7 @@ if not article_id:
                                         audio_ok = generate_and_upload_article_audio(audio_choice_id)
 
                                     if audio_ok:
-                                        supabase.table("articles").update({"audio_generated": True}).eq("id", audio_choice_id).execute()
+                                        supabase_admin.table("articles").update({"audio_generated": True}).eq("id", audio_choice_id).execute()
                                         st.success("Audio generated and uploaded successfully!")
                                         st.rerun()
                                     else:
@@ -823,7 +823,7 @@ if not article_id:
 
                     with tadabbur_tab:
                         st.write("List of Tadabbur")
-                        tadabbur_data = supabase.table("tadabbur").select("*").execute().data
+                        tadabbur_data = supabase_admin.table("tadabbur").select("*").execute().data
 
                         def _tadabbur_title_or_excerpt(t):
                             title = t.get("arabic_title") or t.get("english_title")
@@ -881,7 +881,7 @@ if not article_id:
                         
                     with nuggets_tab:
                         st.write("List of Nuggets")
-                        nugget_data = supabase.table("nuggets").select("*").execute().data
+                        nugget_data = supabase_admin.table("nuggets").select("*").execute().data
                         st.write("Nuggets from Supabase:", nugget_data)
                         st.write("Statuses:", [n["status"] for n in nugget_data])
                         nugget_rows = [
@@ -943,7 +943,7 @@ if not article_id:
         with manage_articles_tab:
             st.write("Manage Articles")
             articles_data = (
-                supabase.table("articles")
+                supabase_admin.table("articles")
                 .select("*")
                 .eq("author_id", st.session_state.get("user_id"))
                 .execute()
@@ -1081,7 +1081,7 @@ if not article_id:
                                             # audio later
                                         }
                                         try:
-                                            response = supabase.table("articles").insert(insert_data).execute()
+                                            response = supabase_admin.table("articles").insert(insert_data).execute()
                                         except Exception as exc:
                                             response = None
                                             st.error(f"Failed to create article: {exc}")
@@ -1325,7 +1325,7 @@ if not article_id:
                                     "language": tadabbur_language,
                                 }
                                 try:
-                                    tadabbur_response = supabase.table("tadabbur").insert(tadabbur_insert_data).execute()
+                                    tadabbur_response = supabase_admin.table("tadabbur").insert(tadabbur_insert_data).execute()
                                 except Exception as exc:
                                     tadabbur_response = None
                                     st.error(f"Failed to submit tadabbur: {exc}")
@@ -1348,7 +1348,7 @@ else:
     def fetch_article_content(article_id: str):
         """Fetch full article content from Supabase using ID."""
         res = (
-            supabase.table("articles")
+            supabase_admin.table("articles")
             .select("*")
             .eq("id", article_id)
             .execute()
@@ -1385,7 +1385,7 @@ else:
             with delete_col:
                 if st.button("🗑 Delete Article"):
                     try:
-                        supabase.table("articles").delete().eq("id", article_id).execute()
+                        supabase_admin.table("articles").delete().eq("id", article_id).execute()
                         delete_file_from_r2(
                             f"{title.lower().replace(' ', '-')}.jpg",
                             f"articles/{article['author_id']}/{title.lower().replace(' ', '-')}"
