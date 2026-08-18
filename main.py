@@ -327,6 +327,17 @@ def update_tadabbur_status(tadabbur_id: str, new_status: str) -> bool:
         st.error(f"Failed to update status: {exc}")
         return False
 
+def update_nugget_status(nugget_id: str, new_status: str) -> bool:
+    """Update a specific nugget's status in Supabase. Returns True on success."""
+    try:
+        supabase.table("nuggets").update({"status": new_status}).eq(
+            "id", nugget_id
+        ).execute()
+        return True
+    except Exception as exc:
+        st.error(f"Failed to update status: {exc}")
+        return False
+
 
 def translate_and_update_tadabbur(tadabbur_id: str) -> bool:
     """Translate an approved tadabbur into whichever language it's missing.
@@ -381,6 +392,62 @@ def translate_and_update_tadabbur(tadabbur_id: str) -> bool:
 
     try:
         supabase.table("tadabbur").update(update_data).eq("id", tadabbur_id).execute()
+    except Exception as exc:
+        st.warning(f"Translation succeeded but saving it failed: {exc}")
+        return False
+
+    return True
+
+def translate_and_update_nugget(nugget_id: str) -> bool:
+    """Translate an approved nugget into whichever language it's missing.
+
+    Mirrors translate_and_update_article: source language comes from the
+    `language` column. Only title/content are translated -- nugget has no
+    summary field. Skips (and returns True) if the target-language content
+    is already populated, so re-approving never clobbers a manually
+    corrected translation.
+    """
+    try:
+        response = supabase.table("nugget").select("*").eq("id", nugget_id).single().execute()
+    except Exception as exc:
+        st.warning(f"Could not load nugget for translation: {exc}")
+        return False
+
+    if not response.data:
+        st.warning("nugget not found for translation.")
+        return False
+
+    row = response.data
+    source_language = row.get("language")
+    if source_language not in ("Arabic", "English"):
+        st.warning("nugget has no recognized language set, skipping translation.")
+        return False
+
+    target_language = other_language(source_language)
+
+    if row.get(f"{target_language.lower()}_text"):
+        return True
+
+    source_text = row.get(f"{source_language.lower()}_text")
+    if not source_text:
+        st.warning("nugget has no content to translate.")
+        return False
+
+    payload = {"text": source_text}
+
+    try:
+        translated = translate_article(payload, source_language)
+    except Exception as exc:
+        st.warning(f"Translation failed: {exc}")
+        return False
+
+    if not translated:
+        return True
+
+    update_data = {f"{target_language.lower()}_{key}": value for key, value in translated.items()}
+
+    try:
+        supabase.table("nugget").update(update_data).eq("id", nugget_id).execute()
     except Exception as exc:
         st.warning(f"Translation succeeded but saving it failed: {exc}")
         return False
@@ -454,6 +521,39 @@ def process_tadabbur_status_changes(edited_rows: dict, df_tadabbur: pd.DataFrame
                 st.warning("Status updated, but translation could not be completed.")
             else:
                 st.success("Status updated, tadabbur translated, and verse coverage checked.")
+        else:
+            st.success("Status updated successfully!")
+
+        any_processed = True
+
+    if any_processed:
+        st.session_state[editor_key]["edited_rows"] = {}
+        st.rerun()
+
+def process_nugget_status_changes(edited_rows: dict, df_nugget: pd.DataFrame, editor_key: str):
+    any_processed = False
+    for index, change in edited_rows.items():
+        if "Status" not in change:
+            continue
+
+        row = df_nugget.iloc[index]
+        row_nugget_id = row["ID"]
+        new_status = change["Status"]
+
+        with st.spinner("Updating status..."):
+            status_ok = update_nugget_status(row_nugget_id, new_status)
+
+        if not status_ok:
+            continue
+
+        if new_status == "approved":
+            with st.spinner("Translating nugget..."):
+                translation_ok = translate_and_update_nugget(row_nugget_id)
+
+            if not translation_ok:
+                st.warning("Status updated, but translation could not be completed.")
+            else:
+                st.success("Status updated, nugget translated.")
         else:
             st.success("Status updated successfully!")
 
@@ -593,7 +693,7 @@ if not article_id:
 
             with manage_data_tab:
                 with st.container(border=True, height=500):
-                    users_tab, articles_tab, tadabbur_tab = st.tabs(["Users", "Articles", "Tadabbur"])
+                    users_tab, articles_tab, tadabbur_tab, nuggets_tab= st.tabs(["Users", "Articles", "Tadabbur", "Nuggets"])
                     with users_tab:
                         st.write("List of Users")
                         users = supabase_admin.auth.admin.list_users()
@@ -777,6 +877,47 @@ if not article_id:
                         edited_tadabbur_rows = st.session_state.get(admin_tadabbur_editor_key, {}).get("edited_rows", {})
                         if edited_tadabbur_rows:
                             process_tadabbur_status_changes(edited_tadabbur_rows, df_tadabbur, admin_tadabbur_editor_key)
+
+                    with nuggets_tab:
+                        st.write("List of Nuggets")
+                        nugget_data = supabase.table("nuggets").select("*").execute().data
+
+                        nugget_rows = [
+                            (
+                                n["id"],
+                                n.get("display_author") or "Unknown Author",
+                                n.get("english_text") or n["arabic_text"],
+                                n["status"],
+                            )
+                            for n in nugget_data
+                        ]
+                        df_nugget = pd.DataFrame(
+                            nugget_rows,
+                            columns=["ID", "Display Author", "Text", "Status"],
+                        )
+
+                        admin_nugget_editor_key = "admin_nugget_table_editor"
+                        st.data_editor(
+                            df_nugget,
+                            use_container_width=True,
+                            column_order=["Display Author", "Text", "Status"],
+                            column_config={
+                                "Display Author": st.column_config.TextColumn("Display Author", disabled=True),
+                                "Text": st.column_config.TextColumn("Text", disabled=True),
+                                "Status": st.column_config.SelectboxColumn(
+                                    "Status",
+                                    help="Toggle to change nugget status",
+                                    options=["pending", "approved", "rejected"],
+                                ),
+                            },
+                            disabled=["Display Author", "Text"],
+                            hide_index=True,
+                            key=admin_nugget_editor_key,
+                        )
+
+                        edited_nugget_rows = st.session_state.get(admin_nugget_editor_key, {}).get("edited_rows", {})
+                        if edited_nugget_rows:
+                            process_nugget_status_changes(edited_nugget_rows, df_nugget, admin_nugget_editor_key)
 
             reset_timestamp = elevenlabs_user.subscription.next_character_count_reset_unix
             if reset_timestamp:
