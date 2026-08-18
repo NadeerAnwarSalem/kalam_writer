@@ -882,8 +882,6 @@ if not article_id:
                     with nuggets_tab:
                         st.write("List of Nuggets")
                         nugget_data = supabase_admin.table("nuggets").select("*").execute().data
-                        st.write("Nuggets from Supabase:", nugget_data)
-                        st.write("Statuses:", [n["status"] for n in nugget_data])
                         nugget_rows = [
                             (
                                 n["id"],
