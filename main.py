@@ -878,27 +878,21 @@ if not article_id:
                         if edited_tadabbur_rows:
                             process_tadabbur_status_changes(edited_tadabbur_rows, df_tadabbur, admin_tadabbur_editor_key)
 
+                        
                     with nuggets_tab:
                         st.write("List of Nuggets")
                         nugget_data = supabase.table("nuggets").select("*").execute().data
-
-                        nugget_rows = []
-                        for n in nugget_data:
-                            text = (
-                                n.get("arabic_text")
-                                or n.get("english_text")
-                                or n.get("text")
-                                or ""
+                        st.write("Nuggets from Supabase:", nugget_data)
+                        st.write("Statuses:", [n["status"] for n in nugget_data])
+                        nugget_rows = [
+                            (
+                                n["id"],
+                                n.get("display_author") or "Unknown Author",
+                                n.get("arabic_text") or n["english_text"],
+                                n["status"],
                             )
-                            status = (n.get("status") or "pending").strip().lower()
-                            nugget_rows.append(
-                                (
-                                    n.get("id"),
-                                    n.get("display_author") or "Unknown Author",
-                                    text,
-                                    status,
-                                )
-                            )
+                            for n in nugget_data
+                        ]
                         df_nugget = pd.DataFrame(
                             nugget_rows,
                             columns=["ID", "Display Author", "Text", "Status"],
