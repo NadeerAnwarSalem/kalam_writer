@@ -882,15 +882,23 @@ if not article_id:
                         st.write("List of Nuggets")
                         nugget_data = supabase.table("nuggets").select("*").execute().data
 
-                        nugget_rows = [
-                            (
-                                n["id"],
-                                n.get("display_author") or "Unknown Author",
-                                n.get("arabic_text") or n["english_text"],
-                                n["status"],
+                        nugget_rows = []
+                        for n in nugget_data:
+                            text = (
+                                n.get("arabic_text")
+                                or n.get("english_text")
+                                or n.get("text")
+                                or ""
                             )
-                            for n in nugget_data
-                        ]
+                            status = (n.get("status") or "pending").strip().lower()
+                            nugget_rows.append(
+                                (
+                                    n.get("id"),
+                                    n.get("display_author") or "Unknown Author",
+                                    text,
+                                    status,
+                                )
+                            )
                         df_nugget = pd.DataFrame(
                             nugget_rows,
                             columns=["ID", "Display Author", "Text", "Status"],
