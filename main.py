@@ -886,7 +886,7 @@ if not article_id:
                             (
                                 n["id"],
                                 n.get("display_author") or "Unknown Author",
-                                n.get("english_text") or n["arabic_text"],
+                                n.get("arabic_text") or n["english_text"],
                                 n["status"],
                             )
                             for n in nugget_data
