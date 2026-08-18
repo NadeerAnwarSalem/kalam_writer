@@ -408,7 +408,7 @@ def translate_and_update_nugget(nugget_id: str) -> bool:
     corrected translation.
     """
     try:
-        response = supabase.table("nugget").select("*").eq("id", nugget_id).single().execute()
+        response = supabase.table("nuggets").select("*").eq("id", nugget_id).single().execute()
     except Exception as exc:
         st.warning(f"Could not load nugget for translation: {exc}")
         return False
@@ -447,7 +447,7 @@ def translate_and_update_nugget(nugget_id: str) -> bool:
     update_data = {f"{target_language.lower()}_{key}": value for key, value in translated.items()}
 
     try:
-        supabase.table("nugget").update(update_data).eq("id", nugget_id).execute()
+        supabase.table("nuggets").update(update_data).eq("id", nugget_id).execute()
     except Exception as exc:
         st.warning(f"Translation succeeded but saving it failed: {exc}")
         return False
