@@ -983,9 +983,85 @@ if not article_id:
                     key="article_table_editor",
                 )
             with manage_tadabbur_tab:
-                pass
+                st.write("Manage Tadabbur")
+                tadabbur_data = (
+                    supabase.table("tadabbur")
+                    .select("*")
+                    .eq("author_id", st.session_state.get("user_id"))
+                    .execute()
+                    .data
+                )
+
+                def _tadabbur_title_or_excerpt(t):
+                    title = t.get("arabic_title") or t.get("english_title")
+                    if title:
+                        return title
+                    content = (t.get("arabic_content") or t.get("english_content") or "").strip().replace("\n", " ")
+                    return content[:60] + ("..." if len(content) > 60 else "")
+
+                tadabbur_rows = [
+                    (
+                        t["id"],
+                        (
+                            f"{t['surah']}:{t['start_ayah']}-{t['end_ayah']}"
+                            if t["start_ayah"] != t["end_ayah"]
+                            else f"{t['surah']}:{t['start_ayah']}"
+                        ),
+                        _tadabbur_title_or_excerpt(t),
+                        t["status"],
+                    )
+                    for t in tadabbur_data
+                ]
+                df_tadabbur = pd.DataFrame(
+                    tadabbur_rows,
+                    columns=["ID", "Verse Reference", "Title", "Status"],
+                )
+                st.data_editor(
+                    df_tadabbur,
+                    width="stretch",
+                    column_order=["Verse Reference", "Title", "Status"],
+                    column_config={
+                        "Verse Reference": st.column_config.TextColumn("Verse Reference", disabled=True),
+                        "Title": st.column_config.TextColumn("Title", disabled=True),
+                        "Status": st.column_config.TextColumn("Status", disabled=True),
+                    },
+                    disabled=["Verse Reference", "Title", "Status"],
+                    hide_index=True,
+                    key="tadabbur_table_editor",
+                )
             with manage_nuggets_tab:
-                pass
+                st.write("Manage Nuggets")
+                nugget_data = (
+                    supabase.table("nuggets")
+                    .select("*")
+                    .eq("author_id", st.session_state.get("user_id"))
+                    .execute()
+                    .data
+                )
+                nugget_rows = [
+                    (
+                        n["id"],
+                        n.get("arabic_text") or n.get("english_text"),
+                        n["status"],
+                    )
+                    for n in nugget_data
+                ]
+                df_nugget = pd.DataFrame(
+                    nugget_rows,
+                    columns=["ID", "Text", "Status"],
+                )
+                st.data_editor(
+                    df_nugget,
+                    width="stretch",
+                    column_order=["Text", "Status"],
+                    column_config={
+                        "Text": st.column_config.TextColumn("Text", disabled=True),
+                        "Status": st.column_config.TextColumn("Status", disabled=True),
+                    },
+                    disabled=["Text", "Status"],
+                    hide_index=True,
+                    key="nugget_table_editor",
+                )
 
         with create_article_tab:
             with st.expander("Create New Article", expanded=True):

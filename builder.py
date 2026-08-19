@@ -2,6 +2,8 @@ import time
 import requests
 
 from functools import lru_cache
+from ollama import Client as OllamaClient
+from streamlit import secrets
 
 
 BASE = "https://api.quranpedia.net/v1"
@@ -9,6 +11,55 @@ HAFS_MUSHAF_ID = 1
 
 SHORT_TAFSIR_HINTS = ["الميسر", "مختصر", "التسهيل"]
 ASBAB_SEARCH_QUERIES = ["أسباب النزول", "اسباب النزول"]
+
+# Same hosted-Ollama pattern used for translation elsewhere in the app
+# (see articles_translate_supabase.py) -- kept consistent so both live
+# calls share one model/config to reason about.
+OLLAMA_MODEL = "gemma4:31b-cloud"
+
+SHORT_SUMMARY_SYSTEM_PROMPT = """أنتَ مُساعدٌ يُلخِّصُ نصَّ تفسيرٍ لآيةٍ قرآنيَّةٍ في "خُطَّافٍ" قصيرٍ جِدًّا يُقرَأُ في ثوانٍ.
+
+قواعدُ صارِمةٌ:
+١. اكتُبِ الملخَّصَ بالعربيَّةِ الفُصحى معَ التَّشكيلِ الكامِلِ.
+٢. جُملةٌ واحدةٌ إلى جُملتَينِ فقط (لا تتجاوَزْ ٤٠ كلمةً)، تلتقِطُ جوهرَ المعنى أو الحِكمةِ الأبرزَ في التَّفسيرِ.
+٣. لا مُقدِّماتٍ ولا خواتيمَ ولا عناوينَ، ابدأْ مُباشرةً بالمحتوى.
+٤. مَمنوعٌ نقلُ نصِّ الآيةِ حرفيًّا؛ أشِرْ إليها باسمِ السُّورةِ ورقمِ الآيةِ فقط إن لزِمَ.
+٥. مَمنوعٌ استخدامُ رمزِ "ﷺ"، اكتُبِ "صلَّى اللهُ عليهِ وسلَّمَ" كاملةً إن وردَ ذِكرُ النَّبيِّ.
+٦. أسلوبٌ جاذِبٌ يُشوِّقُ القارئَ لفتحِ التَّفصيلِ الكامِلِ، لا أسلوبٌ أكاديميٌّ جافٌّ."""
+
+FULL_SUMMARY_SYSTEM_PROMPT = """أنتَ مُساعدٌ يُلخِّصُ نصَّ تفسيرٍ لآيةٍ قرآنيَّةٍ في قِراءةٍ سريعةٍ سَهلةٍ الفَهمِ، دونَ الإخلالِ بالمعنى.
+
+قواعدُ صارِمةٌ:
+١. اكتُبِ الملخَّصَ بالعربيَّةِ الفُصحى معَ التَّشكيلِ الكامِلِ.
+٢. لخِّصِ الفكرةَ في فِقرتَينِ إلى ثلاثِ فِقراتٍ قصيرةٍ، لا تنقُلِ النَّصَّ المصدرَ حرفيًّا ولا تُطِلْ فيهِ.
+٣. لا مُقدِّماتٍ مِثلَ "فيما يلي مُلخَّصٌ" ولا خواتيمَ ولا عناوينَ، ابدأْ مُباشرةً بالمحتوى.
+٤. مَمنوعٌ نقلُ نصِّ أيِّ آيةٍ حرفيًّا؛ أشِرْ إليها باسمِ السُّورةِ ورقمِ الآيةِ فقط، مِثالُ: "كما قالَ اللهُ تعالى في سُورةِ البقرةِ الآيةِ ٢٨٦...".
+٥. مَمنوعٌ استخدامُ رمزِ "ﷺ"، اكتُبِ "صلَّى اللهُ عليهِ وسلَّمَ" كاملةً إن وردَ ذِكرُ النَّبيِّ.
+٦. إذا كانَ النَّصُّ المصدرُ يتضمَّنُ سببَ نُزولٍ، فاجعلْ قصَّتَه واضحةً بيِّنةً ضِمنَ الملخَّصِ؛ وإلَّا فأبرِزِ المقصودَ والحُكمَ الَّذي تحملُه الآيةُ.
+٧. أسلوبٌ واضحٌ سَلِسٌ يُحبَّبُ القارئَ في المتابَعةِ، لا نقلٌ حرفيٌّ ولا حشوٌ."""
+
+
+def _summarize(system_prompt: str, raw_text: str, surah: int, ayah: int) -> str:
+    """Send raw tafsir text through the hosted Ollama model to get a
+    digestible summary instead of storing the raw source text verbatim."""
+    client = OllamaClient(
+        host="https://ollama.com",
+        headers={"Authorization": f"Bearer {secrets.get('OLLAMA_API')}"},
+    )
+    resp = client.chat(
+        model=OLLAMA_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"لخِّصْ نصَّ التَّفسيرِ التَّالي للآيةِ رقمِ {ayah} مِن سُورةِ رقمِ {surah} "
+                    f"وفقَ القواعدِ المذكورةِ:\n\n{raw_text}"
+                ),
+            },
+        ],
+    )
+    return resp.message.content
 
 
 
@@ -95,26 +146,32 @@ class QuranArticleBuilder:
         if short_book:
             content = self.client.get_book_content_for_ayah(surah, ayah, short_book["id"])
             if content and content.get("content"):
-                short_description = " ". join(c["text"] for c in content["content"]).strip()
-                short_source = short_book["name"]
+                raw_short = " ". join(c["text"] for c in content["content"]).strip()
+                if raw_short:
+                    short_description = _summarize(SHORT_SUMMARY_SYSTEM_PROMPT, raw_short, surah, ayah)
+                    short_source = short_book["name"]
 
         #---------FULL DESCRIPTION---------
         full_description, full_source, has_asbab = "", None, False
+        raw_full = ""
         for book_id in self.client.get_asbab_book_ids():
             content = self.client.get_book_content_for_ayah(surah, ayah, book_id)
             if content and content.get("content"):
-                full_description = " ".join(c["text"] for c in content["content"]).strip()
+                raw_full = " ".join(c["text"] for c in content["content"]).strip()
                 full_source = content["book"]["name"]
                 has_asbab = True
                 break
 
-        if not full_description:
+        if not raw_full:
             fuller_book = self._pick_fuller_tafsir_book(surah, exclude_id=short_book["id"] if short_book else None)
             if fuller_book:
                 content = self.client.get_book_content_for_ayah(surah, ayah, fuller_book["id"])
                 if content and content.get("content"):
-                    full_description = " ".join(c["text"] for c in content["content"]).strip()
+                    raw_full = " ".join(c["text"] for c in content["content"]).strip()
                     full_source = fuller_book["name"]
+
+        if raw_full:
+            full_description = _summarize(FULL_SUMMARY_SYSTEM_PROMPT, raw_full, surah, ayah)
 
         return {
             "surah": surah,
