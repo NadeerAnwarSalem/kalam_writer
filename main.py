@@ -620,9 +620,53 @@ def edit_article_dialog(article_data: dict):
             st.error(f"Failed to update article: {exc}")
 
 
-article_id = st.query_params.get("article_id")
+@st.dialog("Edit Tadabbur Dialog", dismissible=True)
+def edit_tadabbur_dialog(tadabbur_data: dict):
+    lang = tadabbur_data["language"]
+    current_title = tadabbur_data.get(f"{lang.lower()}_title") or ""
+    st.title(f"Edit Tadabbur: {current_title or 'Untitled'}")
+    new_title = st.text_input("Title (optional)", value=current_title, max_chars=40)
+    write, pdf, word, txt = st.tabs(["Write", "PDF", "Word", "Text"])
+    with write:
+        new_content = st.text_area(
+            "Your Reflection", value=tadabbur_data.get(f"{lang.lower()}_content", ""), max_chars=10000, height=300
+        )
+    with pdf:
+        uploaded_pdf = st.file_uploader("Upload PDF", type=["pdf"], key="edit_tadabbur_pdf")
+        if uploaded_pdf:
+            new_content = extract_text(uploaded_pdf, "pdf")
+    with word:
+        uploaded_word = st.file_uploader("Upload Word Document", type=["docx", "doc"], key="edit_tadabbur_word")
+        if uploaded_word:
+            new_content = extract_text(uploaded_word, "docx")
+    with txt:
+        uploaded_txt = st.file_uploader("Upload Text File", type=["txt"], key="edit_tadabbur_txt")
+        if uploaded_txt:
+            new_content = extract_text(uploaded_txt, "txt")
 
-if not article_id:
+    new_tags = st.multiselect("Tags", options=TAG_OPTIONS, max_selections=5, default=tadabbur_data.get("tags") or [])
+    new_display_author = st.text_input("Display Author", value=tadabbur_data.get("display_author", "Unknown Author"))
+
+    if st.button("Save Changes"):
+        updated_data = {
+            f"{lang.lower()}_title": new_title.strip() if new_title.strip() else None,
+            f"{lang.lower()}_content": new_content,
+            "display_author": new_display_author,
+            "tags": new_tags,
+            "reading_time_minutes": calculate_reading_time(new_content),
+        }
+        try:
+            supabase_admin.table("tadabbur").update(updated_data).eq("id", tadabbur_data["id"]).execute()
+            st.success("Tadabbur updated successfully!")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Failed to update tadabbur: {exc}")
+
+
+article_id = st.query_params.get("article_id")
+tadabbur_id = st.query_params.get("tadabbur_id")
+
+if not article_id and not tadabbur_id:
     if not st.session_state.get("logged_in"):
         with st.form("login_form"):
             st.write("Login Form")
@@ -860,12 +904,15 @@ if not article_id:
                             tadabbur_rows,
                             columns=["ID", "Display Author", "Verse Reference", "Title", "Status", "Surah", "Start Ayah", "End Ayah"],
                         )
+                        df_tadabbur["Options"] = df_tadabbur["ID"].apply(
+                            lambda tid: f"/Tadabbur_Reader?tadabbur_id={tid}"
+                        )
 
                         admin_tadabbur_editor_key = "admin_tadabbur_table_editor"
                         st.data_editor(
                             df_tadabbur,
                             use_container_width=True,
-                            column_order=["Display Author", "Verse Reference", "Title", "Status"],
+                            column_order=["Display Author", "Verse Reference", "Title", "Status", "Options"],
                             column_config={
                                 "Display Author": st.column_config.TextColumn("Display Author", disabled=True),
                                 "Verse Reference": st.column_config.TextColumn("Verse Reference", disabled=True),
@@ -875,8 +922,12 @@ if not article_id:
                                     help="Toggle to change tadabbur status",
                                     options=["pending", "approved", "rejected"],
                                 ),
+                                "Options": st.column_config.LinkColumn(
+                                    "Configure",
+                                    display_text="Options",
+                                ),
                             },
-                            disabled=["Display Author", "Verse Reference", "Title"],
+                            disabled=["Display Author", "Verse Reference", "Title", "Options"],
                             hide_index=True,
                             key=admin_tadabbur_editor_key,
                         )
@@ -1016,16 +1067,23 @@ if not article_id:
                     tadabbur_rows,
                     columns=["ID", "Verse Reference", "Title", "Status"],
                 )
+                df_tadabbur["Options"] = df_tadabbur["ID"].apply(
+                    lambda tid: f"/Tadabbur_Reader?tadabbur_id={tid}"
+                )
                 st.data_editor(
                     df_tadabbur,
                     width="stretch",
-                    column_order=["Verse Reference", "Title", "Status"],
+                    column_order=["Verse Reference", "Title", "Status", "Options"],
                     column_config={
                         "Verse Reference": st.column_config.TextColumn("Verse Reference", disabled=True),
                         "Title": st.column_config.TextColumn("Title", disabled=True),
                         "Status": st.column_config.TextColumn("Status", disabled=True),
+                        "Options": st.column_config.LinkColumn(
+                            "Configure",
+                            display_text="Options",
+                        ),
                     },
-                    disabled=["Verse Reference", "Title", "Status"],
+                    disabled=["Verse Reference", "Title", "Status", "Options"],
                     hide_index=True,
                     key="tadabbur_table_editor",
                 )
@@ -1513,5 +1571,65 @@ else:
             st.markdown(content)
         else:
             st.error("Article not found in database.")
+    elif tadabbur_id:
+        def fetch_tadabbur_content(t_id: str):
+            """Fetch full tadabbur content from Supabase using ID."""
+            res = (
+                supabase_admin.table("tadabbur")
+                .select("*")
+                .eq("id", t_id)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+
+        tadabbur = fetch_tadabbur_content(tadabbur_id)
+        if tadabbur:
+            lang = tadabbur["language"]
+            title = tadabbur.get(f"{lang.lower()}_title") or "Untitled Tadabbur"
+            content = tadabbur.get(f"{lang.lower()}_content", "No content available.")
+            verse_ref = (
+                f"{tadabbur['surah']}:{tadabbur['start_ayah']}-{tadabbur['end_ayah']}"
+                if tadabbur["start_ayah"] != tadabbur["end_ayah"]
+                else f"{tadabbur['surah']}:{tadabbur['start_ayah']}"
+            )
+
+            st.title(title)
+            st.subheader(f"Surah {verse_ref}")
+            st.write(f"Created by {tadabbur.get('display_author', 'Unknown Author')}")
+            st.caption(f"Tadabbur ID: `{tadabbur['id']}`")
+
+            download_col, edit_col, delete_col = st.columns([1, 1, 1])
+            with download_col:
+                st.download_button(
+                    label="📥 Download as .txt file",
+                    data=f"{title}\n\n{content}",
+                    file_name=f"{title.lower().replace(' ', '_')}.txt",
+                    mime="text/plain",
+                    type="primary",
+                )
+
+            with edit_col:
+                if st.button("✏️ Edit Tadabbur"):
+                    edit_tadabbur_dialog(tadabbur)
+
+            with delete_col:
+                if st.button("🗑 Delete Tadabbur"):
+                    try:
+                        supabase_admin.table("tadabbur").delete().eq("id", tadabbur_id).execute()
+                        if tadabbur.get("featured_image_url"):
+                            delete_file_from_r2(
+                                f"{tadabbur['slug']}.jpg",
+                                f"tadabbur/{tadabbur['author_id']}/{tadabbur['slug']}"
+                            )
+                        st.success(f"Tadabbur '{title}' deleted successfully!")
+                        st.write("Redirecting to the main page...")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed to delete tadabbur: {exc}")
+
+            st.divider()
+            st.markdown(content)
+        else:
+            st.error("Tadabbur not found in database.")
     else:
-        st.warning("No article ID provided in URL.")
+        st.warning("No article or tadabbur ID provided in URL.")
